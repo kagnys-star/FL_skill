@@ -1,0 +1,7 @@
+---
+project : spirl_fl
+record : true
+entity : yskang
+watch:
+    log: all
+    log_freq: None

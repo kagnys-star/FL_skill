@@ -1,0 +1,7 @@
+d4rl/
+.idea
+__pycache__
+*.egg-info
+experiments/
+outputs/
+spirl/wandb/

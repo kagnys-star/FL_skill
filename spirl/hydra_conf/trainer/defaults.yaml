@@ -1,0 +1,11 @@
+---
+path : "/home/kangys/workspace/FL_skill/spirl/configs/skill_prior_learning/kitchen/FL_hierarchial_cl"
+init_data_dir : ${fed.init_data_dir}
+log_interval : !!int 500
+val_interval : 10
+prefix : Null
+params :
+  batch_size : 128
+  num_epochs : 5
+  epoch_cycles_train : 20
+  exp_path : ${exp_path}

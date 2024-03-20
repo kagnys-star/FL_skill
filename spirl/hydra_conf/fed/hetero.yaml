@@ -1,0 +1,6 @@
+---
+clients :  !!int 7
+rounds : !!int 10
+type : hetero
+init_data_dir : "/home/kangys/workspace/FL_skill/data/data10/"
+exp_path : Null
