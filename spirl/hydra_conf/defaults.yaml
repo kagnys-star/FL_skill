@@ -1,8 +1,0 @@
----
-random_seed : !!int 8888
-exp_path : Null
-defaults:
- - _self_
- - fed : iid
- - wandb: defaults
- - trainer : defaults

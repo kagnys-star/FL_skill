@@ -9,13 +9,16 @@ from spirl.rl.components.environment import GymEnv
 
 class KitchenEnv(GymEnv):
     """Tiny wrapper around GymEnv for Kitchen tasks."""
-    SUBTASKS = ['microwave', 'kettle', 'slide cabinet', 'hinge cabinet', 'bottom burner', 'light switch', 'top burner']\
+    SUBTASKS = ['microwave', 'kettle', 'slide cabinet', 'hinge cabinet', 'bottom burner', 'light switch', 'top burner']
     
     def __init__(self, config):
         self._hp = self._default_hparams().overwrite(config)
         self._env = self._make_env(self._hp.name)
         self._env.TASK_ELEMENTS = ['kettle']
-    
+        self._env.ENFORCE_TASK_ORDER = False
+        self._env.tasks_to_complete = list(self._env.TASK_ELEMENTS)
+
+
     def _default_hparams(self):
         return super()._default_hparams().overwrite(ParamDict({
             'name': "kitchen-mixed-v0",
@@ -41,14 +44,3 @@ class KitchenEnv(GymEnv):
             self.solved_subtasks[task] = 1 if task in completed_subtasks or self.solved_subtasks[task] else 0
         return info
 
-
-class NoGoalKitchenEnv(KitchenEnv):
-    """Splits off goal from obs."""
-    def step(self, *args, **kwargs):
-        obs, rew, done, info = super().step(*args, **kwargs)
-        obs = obs[:int(obs.shape[0]/2)]
-        return obs, rew, done, info
-
-    def reset(self, *args, **kwargs):
-        obs = super().reset(*args, **kwargs)
-        return obs[:int(obs.shape[0]/2)]

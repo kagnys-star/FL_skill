@@ -38,8 +38,8 @@ class MetaworldEnv(GymEnv):
     def _wrap_observation(self, obs):
         one_hot = np.zeros(self.n_total_tasks)
         one_hot[self.task_index] = 1.0
-        return np.concatenate([obs, one_hot])
-
+        return np.concatenate([obs[0], one_hot])
+    
     def _make_env(self, id, seed):
         """Instantiates the environment given the ID."""
         import gym

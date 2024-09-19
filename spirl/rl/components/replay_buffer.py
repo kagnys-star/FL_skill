@@ -200,3 +200,13 @@ class SuccessRateRolloutStorage(RolloutStorage):
         return stats.avg
 
 
+class accuracy_RolloutStorage(RolloutStorage):
+    def rollout_stats(self):
+        """Returns AttrDict of average statistics over the rollouts."""
+        assert self.rollouts    # rollout storage should not be empty
+        rewards = [] 
+        for rollout in self.rollouts:
+            rewards.append(np.stack(rollout.reward).sum())
+        return  AttrDict(
+            rewards = rewards
+        )

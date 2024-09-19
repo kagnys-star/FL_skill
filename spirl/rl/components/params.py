@@ -4,6 +4,7 @@ import argparse
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--path", help="path to the config file directory")
+    parser.add_argument("--csv", default="" ,help="save last val_fun")
 
     # Folder settings
     parser.add_argument("--prefix", help="experiment prefix, if given creates subfolder in experiment directory")

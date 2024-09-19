@@ -41,6 +41,7 @@ class Sampler:
                 with self._agent.rollout_mode():
                     while step < batch_size:
                         # perform one rollout step
+
                         agent_output = self.sample_action(self._obs)
                         if agent_output.action is None:
                             self._episode_reset(global_step)

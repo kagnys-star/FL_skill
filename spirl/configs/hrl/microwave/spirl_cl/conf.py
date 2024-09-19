@@ -1,4 +1,4 @@
-from spirl.configs.hrl.kettle.spirl.conf import *
+from spirl.configs.hrl.microwave.spirl.conf import *
 from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
 from spirl.rl.policies.cl_model_policies import ClModelPolicy
 
@@ -10,7 +10,7 @@ ll_policy_params = AttrDict(
     policy_model=ClSPiRLMdl,
     policy_model_params=ll_model_params,
     policy_model_checkpoint=os.path.join(os.environ["EXP_DIR"],
-                                         "skill_prior_learning/kitchen/iid"),
+                                         "skill_prior_learning/kitchen/test_4-4/3"),
 )
 ll_policy_params.update(ll_model_params)
 

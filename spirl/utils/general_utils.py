@@ -11,6 +11,7 @@ import re
 import random
 import functools
 import itertools
+import math 
 
 from functools import partial, reduce
 import collections
@@ -734,3 +735,4 @@ def pretty_print(d, indent=0):
             pretty_print(value, indent+1)
         else:
             print('\t' * indent + str(key) + ':' + '\t' + str(value))
+

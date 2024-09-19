@@ -32,6 +32,7 @@ class TopOfNEvaluator:
         def get_init_array(val):
             return val * np.ones((self._hp.batch_size, self._top_of_n))
         self.batch_eval_buffer = AttrDict()
+        #matric을 만든다. 배치사이즈 * 최고로 좋은 점수
         for metric_name in self.metrics:
             default_value = 0. if metric_name in TopOfNEvaluator.HIGHER_IS_BETTER_METRICS else np.inf
             self.batch_eval_buffer[metric_name] = get_init_array(default_value)
@@ -296,32 +297,63 @@ class TBEvalLogger(EvalLogger):
         assert self.log_tag is not None     # need to set logging context first
         return 'eval/{}'.format(self.log_tag)
 
-class SequenceEvaluator(TopOfNSequenceEvaluator):
+class batchevaluator(TopOfNSequenceEvaluator):
     """Evaluator class with a single sample per validation sequence."""
-    def __init__(self, hp, logdir, top_comp_metric, *args, **kwargs):
-        super().__init__(hp, logdir, top_of_n=1, top_comp_metric=top_comp_metric, *args, **kwargs)
-        self.init_val_size = 0
 
     def _erase_eval_buffer(self):
         def get_init_array(val):
-            return val * np.ones((self.init_val_size, self._top_of_n))
+            return val * np.ones((self._hp.batch_size, self._top_of_n))
         self.batch_eval_buffer = AttrDict()
         for metric_name in self.metrics:
-            default_value = 0. if metric_name in TopOfNEvaluator.HIGHER_IS_BETTER_METRICS else np.inf
+            default_value = 0.
             self.batch_eval_buffer[metric_name] = get_init_array(default_value)
-        self.batch_eval_buffer.aux_outputs = np.empty(self.init_val_size, dtype=np.object)
+        self.batch_eval_buffer.aux_outputs = np.empty(self._hp.batch_size, dtype=np.object)
 
-    def eval_single(self, inputs, model_output, sample_idx): 
+    def eval_single(self, inputs, model_output, sample_idx):
+        num_batch = next(iter(inputs.values())).size(0)
         for b in range(self.init_val_size):
             for metric_name, metric_fcn in self.metrics.items():
                 self.batch_eval_buffer[metric_name][b, sample_idx] = metric_fcn(inputs, model_output, b)
             self.batch_eval_buffer.aux_outputs[b] = self._store_aux_outputs(inputs, model_output, b)
 
     @timed("Eval time for batch: ")
-    def eval(self, inputs, model):
-        self.init_val_size = next(iter(inputs.values())).size(0)
-        self._erase_eval_buffer()
-        for n in range(self._top_of_n):
-            model_output = model(inputs)
-            self.eval_single(inputs, model_output, sample_idx=n)
+    def eval(self, inputs, model, sample_idx):
+        model_output = model(inputs)
+        self.eval_single(inputs, model_output, sample_idx = sample_idx)
         self._flush_eval_buffer()
+
+class SequenceEvaluator(TopOfNSequenceEvaluator):
+
+    def _erase_eval_buffer(self):
+        def get_init_array(val):
+            return val * np.ones((self._hp.batch_size, self._top_of_n))
+        self.batch_eval_buffer = AttrDict()
+        #matric을 만든다. 배치사이즈 * 최고로 좋은 점수
+        for metric_name in self.metrics:
+            default_value = 0.
+            self.batch_eval_buffer[metric_name] = get_init_array(default_value)
+        self.batch_eval_buffer.aux_outputs = np.empty(self._hp.batch_size, dtype=np.object)
+    
+    def eval_single(self, inputs, model_output, sample_idx):
+        bsize = next(iter(inputs.values())).size(0)
+        avg = 0.
+        for b in range(self._hp.batch_size):
+            if b < bsize:
+                for metric_name, metric_fcn in self.metrics.items():
+                    self.batch_eval_buffer[metric_name][b, sample_idx] = metric_fcn(inputs, model_output, b)
+
+                if self._top_of_n == 1 or \
+                    self._is_better(self.batch_eval_buffer[self._top_comp_metric][b, sample_idx],
+                                    self.batch_eval_buffer[self._top_comp_metric][b], self._top_comp_metric):
+                    self.batch_eval_buffer.aux_outputs[b] = self._store_aux_outputs(inputs, model_output, b)
+                
+                if bsize < self._hp.batch_size:
+                    avg = avg + self.batch_eval_buffer[self._top_comp_metric][b, sample_idx]
+            else:
+                if b == bsize:
+                    avg = avg/ bsize
+                self.batch_eval_buffer[self._top_comp_metric][b, sample_idx] = avg
+
+
+            
+            #나는 평균을 계산해서 넣어주고 싶어.

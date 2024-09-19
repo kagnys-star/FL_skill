@@ -1,4 +1,4 @@
-from spirl.configs.hrl.kettle.base_conf import *
+from spirl.configs.hrl.microwave.base_conf import *
 from spirl.rl.policies.prior_policies import LearnedPriorAugmentedPIPolicy
 from spirl.rl.agents.prior_sac_agent import ActionPriorSACAgent
 

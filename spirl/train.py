@@ -13,12 +13,12 @@ from torch.optim import Adam, RMSprop, SGD
 from functools import partial
 
 from spirl.components.data_loader import RandomVideoDataset
-from spirl.utils.general_utils import RecursiveAverageMeter, map_dict
+from spirl.utils.general_utils import RecursiveAverageMeter, map_dict ,pretty_print
 from spirl.components.checkpointer import CheckpointHandler, save_cmd, save_git, get_config_path
 from spirl.utils.general_utils import dummy_context, AttrDict, get_clipped_optimizer, \
                                                         AverageMeter, ParamDict
 from spirl.utils.pytorch_utils import LossSpikeHook, NanGradHook, NoneGradHook, \
-                                                        DataParallelWrapper, RAdam
+                                                        DataParallelWrapper, RAdam , SAM
 from spirl.components.trainer_base import BaseTrainer
 from spirl.utils.wandb import WandBLogger
 from spirl.components.params import get_args
@@ -70,10 +70,13 @@ class ModelTrainer(BaseTrainer):
         self.logger_test, self.model_test, self.val_loader = self.build_phase(test_params, phase='val')
 
         # set up optimizer + evaluator
-        self.optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.parameters()), lr=self._hp.lr)
+        if self._hp.optimizer == "asam":
+            self.optimizer = SAM( self.model.parameters(),SGD,adaptive=True, lr=self._hp.lr)
+        else:
+            self.optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.parameters()), lr=self._hp.lr)
         self.evaluator = self._hp.evaluator(self._hp, self.log_dir, self._hp.top_of_n_eval,
                                             self._hp.top_comp_metric, tb_logger=self.logger_test)
-        
+
         # load model params from checkpoint
         self.global_step, start_epoch = 0, 0
         if args.resume or conf.ckpt_path is not None:
@@ -94,11 +97,11 @@ class ModelTrainer(BaseTrainer):
             'logger_test': None,
             'evaluator': None,
             'data_dir': None,  # directory where dataset is in
-            'batch_size': 512,
+            'batch_size': 128,
             'exp_path': None,  # Path to the folder with experiments
             'num_epochs': 100,
             'epoch_cycles_train': 1,
-            'optimizer': 'radam',    # supported: 'adam', 'radam', 'rmsprop', 'sgd'
+            'optimizer': 'asam',    # supported: 'adam', 'radam', 'rmsprop', 'sgd'
             'lr': 1e-3,
             'gradient_clip': None,
             'init_grad_clip': 0.001,
@@ -154,7 +157,15 @@ class ModelTrainer(BaseTrainer):
                 if self.global_step < self._hp.init_grad_clip_step:
                     # clip gradients in initial steps to avoid NaN gradients
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self._hp.init_grad_clip)
-                self.optimizer.step()
+                if isinstance(self.optimizer, SAM):
+                    self.optimizer.first_step()  # Perform the ascent step
+                    # Recompute forward pass after the ascent step
+                    output = self.model(inputs)
+                    losses = self.model.loss(output, inputs)
+                    losses.total.value.backward()  # Second backward pass
+                    self.optimizer.second_step()
+                else:
+                    self.optimizer.step()
                 self.model.step()
 
             if self.args.train_loop_pdb:

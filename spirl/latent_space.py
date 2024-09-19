@@ -236,8 +236,8 @@ def save_checkpoint(basemodel,folder):
 
 if __name__ == "__main__":
     model_config =AttrDict(
-        state_dim=60,
-        action_dim=9,
+        state_dim=21,
+        action_dim=6,
         n_rollout_steps=10,
         kl_div_weight=5e-4,
         nz_enc=128,
@@ -263,8 +263,15 @@ if __name__ == "__main__":
     #get_z_space(model=basemodel, config=data_config)
     #model_val(model=basemodel, config=data_config)
     #find_skill(num_samples = 10000, model=basemodel)
-    basemodel =  gl_numpy_model_load_change(config=model_config, init_path="/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/kitchen/iid/2/weights/round-60-weights.npz")
-    save_checkpoint(basemodel,folder="/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/kitchen/iid/weights")
+    #basemodel =  gl_numpy_model_load_change(config=model_config, init_path="/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/half_cheetah/fedprox/hetro3/weights/round-500-weights.npz")
+    #save_checkpoint(basemodel,folder="/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/half_cheetah/fedprox/hetro3/weights")
+    # 이 함수는 checkpoint에 다 다 집어 넣는 거다.
+    for i in range(50):
+        save_num = (i+1)*10
+        basemodel =  gl_numpy_model_load_change(config=model_config, init_path=f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/half_cheetah/fedadagrad/hetero2/weights/round-{save_num}-weights.npz")
+        save_path = f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/half_cheetah/fedadagrad/hetero2/repeat/{save_num}/weights"
+        save_checkpoint(basemodel,folder=save_path)
+
     '''
     dataset_class = basemodel.conf.data.dataset_spec.dataset_class
     phase = 'val'

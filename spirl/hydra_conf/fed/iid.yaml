@@ -1,6 +1,0 @@
----
-clients :  !!int 7
-rounds : !!int 10
-type : iid_data
-init_data_dir : "/home/kangys/workspace/FL_skill/data/data8/"
-exp_path : ${exp_path}

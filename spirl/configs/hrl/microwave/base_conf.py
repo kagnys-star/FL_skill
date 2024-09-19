@@ -23,8 +23,8 @@ configuration = {
     'environment': KitchenEnv,
     'sampler': HierarchicalSampler,
     'data_dir': '.',
-    'num_epochs': 15,
-    'max_rollout_len': 280,
+    'num_epochs': 8,
+    'max_rollout_len': 150,
     'n_steps_per_epoch': 100000,
     'n_warmup_steps': 5e3,
     }
@@ -54,7 +54,7 @@ base_agent_params = AttrDict(
 ll_model_params = AttrDict(
     state_dim=data_spec.state_dim,
     action_dim=data_spec.n_actions,
-    kl_div_weight=5e-4,
+    kl_div_weight=0,
     nz_enc=128,
     nz_mid=128,
     n_processing_layers=5,
@@ -118,6 +118,6 @@ data_config.dataset_spec = data_spec
 
 # Environment
 env_config = AttrDict(
-    reward_norm=1.,
+    task_id=0,
 )
 

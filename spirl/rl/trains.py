@@ -13,7 +13,14 @@ from spirl.rl.utils.mpi import update_with_mpi_config, set_shutdown_hooks, mpi_s
 from spirl.rl.utils.wandb import WandBLogger
 from spirl.rl.utils.rollout_utils import RolloutSaver
 from spirl.rl.components.sampler import Sampler
-from spirl.rl.components.replay_buffer import RolloutStorage,SuccessRateRolloutStorage
+from spirl.rl.components.replay_buffer import RolloutStorage, SuccessRateRolloutStorage , accuracy_RolloutStorage
+import imageio
+import random
+import string
+import numpy as np
+
+
+
 
 WANDB_PROJECT_NAME = 'FL'
 WANDB_ENTITY_NAME = 'yskang'
@@ -31,7 +38,8 @@ class RLTrainer:
         self._hp.exp_path = make_path(self.conf.exp_dir, args.path, args.prefix, args.new_dir)
         self.log_dir = log_dir = os.path.join(self._hp.exp_path, 'log')
         print('using log dir: ', log_dir)
-
+        pretty_print(self.conf)
+        exit()
         # set seeds, display, worker shutdown
         if args.seed != -1: self._hp.seed = args.seed   # override from command line if set
         set_seeds(self._hp.seed)
@@ -52,8 +60,8 @@ class RLTrainer:
         if 'general' in self.conf: self.conf.general.seed=self._hp.seed
         self.env = self._hp.environment(self.conf.env)
         self.conf.agent.env_params = self.env.agent_params      # (optional) set params from env for agent
-        if self.is_chef:
-            pretty_print(self.conf)
+        #if self.is_chef:
+        #    pretty_print(self.conf)
 
         # build agent (that holds actor, critic, exposes update method)
         self.conf.agent.num_workers = self.conf.mpi.num_workers
@@ -113,7 +121,7 @@ class RLTrainer:
                     'state_dict': self.agent.state_dict(),
                 }, os.path.join(self._hp.exp_path, 'weights'), CheckpointHandler.get_ckpt_name(epoch))
                 self.agent.save_state(self._hp.exp_path)
-                #self.val()
+                self.val()
 
     def train_epoch(self, epoch):
         """Run inner training loop."""
@@ -154,6 +162,7 @@ class RLTrainer:
     def val(self):
         """Evaluate agent."""
         val_rollout_storage = RolloutStorage()
+        #val_rollout_storage= accuracy_RolloutStorage()
         with self.agent.val_mode():
             with torch.no_grad():
                 with timing("Eval rollout time: "):
@@ -161,12 +170,14 @@ class RLTrainer:
                         val_rollout_storage.append(self.sampler.sample_episode(is_train=False, render=False))
                         
         rollout_stats = val_rollout_storage.rollout_stats()
+        #save_frames_as_video(val_rollout_storage)
 
         if self.is_chef:
             with timing("Eval log time: "):
                 self.agent.log_outputs(rollout_stats, val_rollout_storage,
                                        self.logger, log_images=False, step=self.global_step)
             print("Evaluation Avg_Reward: {}".format(rollout_stats.avg_reward))
+
         del val_rollout_storage
 
     def generate_rollouts(self):
@@ -261,14 +272,14 @@ class RLTrainer:
             # setup logger
             logger = None
 
-            if self.args.mode == 'train':
-                exp_name = f"{os.path.basename(self.args.path)}_{self.args.prefix}" if self.args.prefix \
-                    else os.path.basename(self.args.path)
-                if self._hp.logging_target == 'wandb':
-                    logger = WandBLogger(exp_name, WANDB_PROJECT_NAME, entity=WANDB_ENTITY_NAME,
-                                         path=self._hp.exp_path, conf=conf)
-                else:
-                    raise NotImplementedError   # TODO implement alternative logging (e.g. TB)
+            #if self.args.mode == 'train':
+            exp_name = f"{os.path.basename(self.args.path)}_{self.args.prefix}" if self.args.prefix \
+                else os.path.basename(self.args.path)
+            if self._hp.logging_target == 'wandb':
+                logger = WandBLogger(exp_name, WANDB_PROJECT_NAME, entity=WANDB_ENTITY_NAME,
+                                        path=self._hp.exp_path, conf=conf)
+            else:
+                raise NotImplementedError   # TODO implement alternative logging (e.g. TB)
             return logger
 
     def setup_device(self):
@@ -320,7 +331,21 @@ class RLTrainer:
     @property
     def use_multiple_workers(self):
         return self.conf.mpi.num_workers > 1
+    
+def generate_random_filename(extension="mp4"):
+    """랜덤한 파일 이름 생성"""
+    letters = string.ascii_letters
+    random_name = ''.join(random.choice(letters) for i in range(10))
+    return f"{random_name}.{extension}"
 
+def save_frames_as_video(rollouts, fps=30):
+    """프레임 리스트를 비디오로 저장"""
+    rollout = rollouts.get()
+    for rollout_episode in rollout:
+        video_filename = generate_random_filename()
+        print(len(rollout_episode['image']))
+        imageio.mimsave(video_filename, [np.array(frame) for frame in rollout_episode['image']], fps=fps)
+        print(f"Video saved as {video_filename}")
 
 if __name__ == '__main__':
     RLTrainer(args=get_args())

@@ -3,8 +3,8 @@ import os
 from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
 from spirl.components.logger import Logger
 from spirl.utils.general_utils import AttrDict
-from spirl.configs.default_data_configs.kitchen import data_spec
-from spirl.components.evaluator import TopOfNSequenceEvaluator
+from spirl.configs.default_data_configs.FL_kitchen import data_spec
+from spirl.components.evaluator import TopOfNSequenceEvaluator, SequenceEvaluator
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -12,11 +12,11 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 configuration = {
     'model': ClSPiRLMdl,
     'logger': Logger,
-    'data_dir': '.',
-    'epoch_cycles_train': 50,
-    'num_epochs': 100,
-    'evaluator': TopOfNSequenceEvaluator,
-    'top_of_n_eval': 100,
+    'data_dir': "./data/data6/",
+    'epoch_cycles_train': 5,
+    'num_epochs': 5,
+    'evaluator': SequenceEvaluator,
+    'top_of_n_eval': 1,
     'top_comp_metric': 'mse',
 }
 configuration = AttrDict(configuration)

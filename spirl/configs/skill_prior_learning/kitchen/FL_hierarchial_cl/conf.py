@@ -3,19 +3,19 @@ from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl, Prox_clients
 from spirl.components.logger import Logger
 from spirl.utils.general_utils import AttrDict
 from spirl.configs.default_data_configs.FL_kitchen import data_spec
-from spirl.components.evaluator import TopOfNSequenceEvaluator
+from spirl.components.evaluator import TopOfNSequenceEvaluator ,SequenceEvaluator
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
 
 configuration = {
-    'model': Prox_clients,
+    'model': ClSPiRLMdl,
     'logger': Logger,
     'data_dir': "./data/data6/",
-    'epoch_cycles_train': 20,
-    'num_epochs': 10,
-    'evaluator': TopOfNSequenceEvaluator,
-    'top_of_n_eval': 100,
+    'epoch_cycles_train': 50,
+    'num_epochs': 2,
+    'evaluator': SequenceEvaluator,
+    'top_of_n_eval': 1,
     'top_comp_metric': 'mse',
 }
 configuration = AttrDict(configuration)

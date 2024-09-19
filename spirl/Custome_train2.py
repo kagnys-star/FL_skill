@@ -31,6 +31,7 @@ class ModelTrainer(BaseTrainer):
     def __init__(self, args,cid,data_dir,grap_round):
         self.args = args
         self.setup_device()
+        self.parameters = None
         # set up params
         self.conf = conf = self.get_config()
         self._hp = self._default_hparams()
@@ -76,7 +77,7 @@ class ModelTrainer(BaseTrainer):
             'logger_test': None,
             'evaluator': None,
             'data_dir': None,  # directory where dataset is in
-            'batch_size': 128,
+            'batch_size': 64,
             'exp_path': None,  # Path to the folder with experiments
             'num_epochs': 200,
             'epoch_cycles_train': 1,
@@ -93,10 +94,11 @@ class ModelTrainer(BaseTrainer):
         })
         return default_dict
     
-    def train(self, parameters) :
+    def train(self) :
+        self.parameters = self.model.state_dict()
         for epoch in range(self.start_epoch, self._hp.num_epochs):
             self.proximal_term = 0
-            self.train_epoch(epoch, parameters)
+            self.train_epoch(epoch)
         
             #save_checkpoint({
             #    'epoch': epoch,
@@ -109,7 +111,7 @@ class ModelTrainer(BaseTrainer):
         self.start_epoch = 0
 
 
-    def train_epoch(self, epoch, parameters):
+    def train_epoch(self, epoch):
         self.model.train()
         epoch_len = len(self.train_loader)
         end = time.time()
@@ -126,7 +128,7 @@ class ModelTrainer(BaseTrainer):
             inputs = AttrDict(map_dict(lambda x: x.to(self.device), sample_batched))
             self.optimizer.zero_grad()
             output = self.model(inputs)
-            losses = self.model.loss(output, inputs, parameters, self.mu )
+            losses = self.model.loss(output, inputs)
             losses.total.value.backward()
             self.call_hooks(inputs, output, losses, epoch)
 
@@ -168,6 +170,7 @@ class ModelTrainer(BaseTrainer):
     def val(self):
         print('Running Testing')
         if self.args.test_prediction:
+            self.parameters = self.model.state_dict()
             start = time.time()
             self.model_test.load_state_dict(self.model.state_dict())
             losses_meter = RecursiveAverageMeter()
@@ -184,11 +187,10 @@ class ModelTrainer(BaseTrainer):
 
                     # run non-val-mode model (inference) to check overfitting
                     output = self.model_test(inputs)
-                    argmax_tensor = torch.argmax(output.skill, dim=1)
-                    indices_equal = torch.eq(inputs.tasks, argmax_tensor)
-                    score = indices_equal.sum().item() / indices_equal.numel()
-                    self.logger_test.log_scalar(score, "Score", self.grap_round, "eval/Score")
-
+                    #argmax_tensor = torch.argmax(output.skill, dim=1)
+                    #indices_equal = torch.eq(inputs.tasks, argmax_tensor)
+                    #score = indices_equal.sum().item() / indices_equal.numel()
+                    #self.logger_test.log_scalar(score, "Score", self.grap_round, "eval/Score")
                     losses = self.model_test.loss(output, inputs)
 
                     losses_meter.update(losses)

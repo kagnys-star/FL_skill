@@ -12,11 +12,11 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 configuration = {
     'model': ClSPiRLMdl,
     'logger': Logger,
-    'data_dir': os.environ['DATA_DIR'],
-    'epoch_cycles_train': 50,
+    'data_dir': "./data/meta/",
+    'epoch_cycles_train': 1,
     'num_epochs': 100,
     'evaluator': TopOfNSequenceEvaluator,
-    'top_of_n_eval': 50,
+    'top_of_n_eval': 100,
     'top_comp_metric': 'mse',
 }
 configuration = AttrDict(configuration)
@@ -36,19 +36,3 @@ model_config = AttrDict(
 data_config = AttrDict()
 data_config.dataset_spec = data_spec
 data_config.dataset_spec.subseq_len = model_config.n_rollout_steps + 1  # flat last action from seq gets cropped
-
-#sweep
-sweep_configuration = {
-    'method': 'random',
-    'name': 'sweep',
-    'metric': {'goal': 'maximize', 'name': 'val_acc'},
-    'parameters': 
-    {
-        'batch_size': {'values': [16, 32, 64]},
-        'epochs': {'values': [5, 10, 15]},
-        'lr': {'max': 0.1, 'min': 0.0001},
-        'kl_div_weight' : {'max': 0.1, 'min': 0.0001}
-
-     }
-}
-sweep_configuration = AttrDict(sweep_configuration)

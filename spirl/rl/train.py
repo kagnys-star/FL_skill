@@ -70,7 +70,6 @@ class RLTrainer:
         # build sampler /// sampler make more
 
         self.sampler = [self._hp.sampler(self.conf.sampler, mul_envs, self.agent, self.logger, self._hp.max_rollout_len) for mul_envs in self.env]
-
         # load from checkpoint
         self.global_step, self.n_update_steps, start_epoch = 0, 0, 0
         if args.resume or self.conf.ckpt_path is not None:

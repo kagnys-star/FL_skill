@@ -86,6 +86,7 @@ class D4RLSequenceSplitDataset():
         return int(self.SPLIT[self.phase] * self.data_len / self.subseq_len)
 
     def _get_filenames(self):
+        filename = None
         for root, _ , files in os.walk(self.data_dir):
             for file in files:
                 if file.endswith(".hdf5"):
