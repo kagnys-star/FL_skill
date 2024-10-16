@@ -4,15 +4,17 @@ import numpy as np
 from contextlib import contextmanager
 import torch
 import torch.nn as nn
+from collections import defaultdict
 from torch.utils.data import DataLoader
 from torch.utils.data import Sampler
 from torch.nn.parallel._functions import Gather
-from torch.optim.optimizer import Optimizer
+from torch.optim.optimizer import Optimizer , required
 from torch.nn.modules import BatchNorm1d, BatchNorm2d, BatchNorm3d
 from torch.nn.functional import interpolate
 
 from spirl.utils.general_utils import batchwise_assign, map_dict, AttrDict, AverageMeter, map_recursive, remove_spatial
 from spirl.utils import ndim
+from typing import Dict
 
 
 class LossSpikeHook:
@@ -620,27 +622,7 @@ def find_tensor(structure, min_dim=None):
 def update_optimizer_lr(optimizer, lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
-
-
-if __name__ == '__main__':
-    # test stacking+padding for tensors/np_arrays
-    def test_stack_pad(generalized_tensors):
-        generalized_tensors = [pad_seq(t, pre=1, length=10) for t in generalized_tensors]
-        stacked_t = stack_with_separator(generalized_tensors, dim=3)
-        print(stacked_t.shape)
-    test_stack_pad([np.random.rand(5, 8, 3, 32, 32) for _ in range(3)])
-    test_stack_pad([torch.rand(5, 8, 3, 32, 32) for _ in range(3)])
-
-    # test decay updater
-    x = torch.ones(1)
-    upd = ExponentialDecayUpdater(x, 100, 2)
-    
-    for i in range(1000):
-        upd.step()
-        
-    print(x)
-
-    
+'''
 class SAM(Optimizer):
     def __init__(self, params, base_optimizer, rho=0.05, adaptive=False, **kwargs):
         assert rho >= 0.0, f"Invalid rho, should be non-negative: {rho}"
@@ -701,3 +683,138 @@ class SAM(Optimizer):
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)
         self.base_optimizer.param_groups = self.param_groups
+
+    def set_lr(self, lr):
+        """Set the learning rate for the base optimizer."""
+        for param_group in self.base_optimizer.param_groups:
+            param_group['lr'] = lr
+'''
+
+class ASAM:
+    def __init__(self, optimizer, model, rho=0.05, eta=0.01):
+        self.optimizer = optimizer
+        self.model = model
+        self.rho = rho
+        self.eta = eta
+        self.state = defaultdict(dict)
+
+    @torch.no_grad()
+    def ascent_step(self):
+        wgrads = []
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            t_w = self.state[p].get("eps")
+            if t_w is None:
+                t_w = torch.clone(p).detach()
+                self.state[p]["eps"] = t_w
+            if 'weight' in n:   
+                t_w[...] = p[...]
+                t_w.abs_().add_(self.eta)
+                p.grad.mul_(t_w)
+            wgrads.append(torch.norm(p.grad, p=2))
+        wgrad_norm = torch.norm(torch.stack(wgrads), p=2) + 1.e-16
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            t_w = self.state[p].get("eps")
+            if 'weight' in n:
+                p.grad.mul_(t_w)
+            eps = t_w
+            eps[...] = p.grad[...]
+            eps.mul_(self.rho / wgrad_norm)
+            p.add_(eps)
+        self.optimizer.zero_grad()
+
+    @torch.no_grad()
+    def descent_step(self):
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            p.sub_(self.state[p]["eps"])
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+
+
+class SAM(ASAM):
+    @torch.no_grad()
+    def ascent_step(self):
+        grads = []
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            grads.append(torch.norm(p.grad, p=2))
+        grad_norm = torch.norm(torch.stack(grads), p=2) + 1.e-16
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            eps = self.state[p].get("eps")
+            if eps is None:
+                eps = torch.clone(p).detach()
+                self.state[p]["eps"] = eps
+            eps[...] = p.grad[...]
+            eps.mul_(self.rho / grad_norm)
+            p.add_(eps)
+        self.optimizer.zero_grad()
+
+
+class ASOL(ASAM):
+    def __init__(self, global_param_dict ,*args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.global_param_dict = global_param_dict  # Global model (ref_param)
+        
+    
+    @torch.no_grad()
+    def ascent_step(self):
+        grads = []
+        scaling_vectors = {}
+        # Get global model parameters for reference
+
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            global_p = self.global_param_dict.get(n, None)
+            if global_p is None:
+                continue  # Skip if no global model parameter is available
+            discrepancy = p - global_p
+            scaling_vectors[n] = discrepancy / (discrepancy.norm(p=2) + 1e-16)
+            grads.append(torch.norm(p.grad, p=2))
+        grad_norm = torch.norm(torch.stack(grads), p=2) + 1.e-16
+
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            global_p = self.global_param_dict.get(n, None)
+            if global_p is None:
+                continue  # Skip if no global model parameter is available
+            eps = self.state[p].get("eps")
+            if eps is None:
+                eps = torch.clone(p).detach()
+                self.state[p]["eps"] = eps
+            eps[...] = p.grad[...]
+            eps.mul_(self.rho / grad_norm * scaling_vectors[n])
+            p.add_(eps)  # Apply the perturbation
+
+        self.optimizer.zero_grad()
+
+    def update_global_params(self,params):
+        self.global_param_dict = params 
+
+
+if __name__ == '__main__':
+    # test stacking+padding for tensors/np_arrays
+    def test_stack_pad(generalized_tensors):
+        generalized_tensors = [pad_seq(t, pre=1, length=10) for t in generalized_tensors]
+        stacked_t = stack_with_separator(generalized_tensors, dim=3)
+        print(stacked_t.shape)
+    test_stack_pad([np.random.rand(5, 8, 3, 32, 32) for _ in range(3)])
+    test_stack_pad([torch.rand(5, 8, 3, 32, 32) for _ in range(3)])
+
+    # test decay updater
+    x = torch.ones(1)
+    upd = ExponentialDecayUpdater(x, 100, 2)
+    
+    for i in range(1000):
+        upd.step()
+        
+    print(x)

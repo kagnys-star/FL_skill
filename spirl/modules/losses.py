@@ -82,3 +82,25 @@ class BCELogitsLoss(Loss):
 class CEELoss(Loss):
     def compute(self, estimates, targets):
         return torch.nn.CrossEntropyLoss()(estimates, targets)
+
+
+class SimpleLoss(Loss):
+    def __call__(self, *args, weights=1, reduction=None, store_raw=False, **kwargs):
+        """
+
+        :param estimates:
+        :param targets:
+        :return:
+        """
+        error = self.compute(*args, **kwargs) * weights
+        if reduction != 'mean':
+            raise NotImplementedError
+        loss = AttrDict(value=error.mean(), weight=self.weight)
+        if self.breakdown is not None:
+            reduce_dim = get_dim_inds(error)[:self.breakdown] + get_dim_inds(error)[self.breakdown+1:]
+            loss.breakdown = error.detach().mean(reduce_dim) if reduce_dim else error.detach()
+        if store_raw:
+            loss.error_mat = error.detach()
+        return loss
+    def compute(self, estimates, targets):
+        return estimates - targets

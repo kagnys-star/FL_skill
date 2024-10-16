@@ -5,7 +5,9 @@ import torch
 
 from spirl.utils.general_utils import flatten_dict, prefix_dict
 from spirl.utils.vis_utils import plot_graph
+import warnings
 
+warnings.filterwarnings("ignore")
 
 class WandBLogger:
     """Logs to WandB."""
@@ -30,7 +32,8 @@ class WandBLogger:
             config=filtered_config,
             dir=path,
             entity=entity,
-            notes=conf.notes if 'notes' in conf else ''
+            notes=conf.notes if 'notes' in conf else '',
+            mode="offline"
         )
 
     def log_scalar_dict(self, d, prefix='', step=None):
@@ -98,4 +101,5 @@ class WandBLogger:
         """Subclasses can implement this method to visualize training results."""
         pass
 
-
+    def alert(self, *args, **kwargs):
+        wandb.alert(*args, **kwargs)

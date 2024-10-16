@@ -1,8 +1,9 @@
 import flwr as fl
 import os
-from strategy import SM_FedYogi, SM_FedAdagrad, SM_FedAdam,\
-                      SM_FedAVG, SM_FedProx, FedNova, FEDASAM
-from client import ModelTrainer
+import numpy as np
+import torch
+from strategy import *
+from cl_model import BaseClients , FN_Clients
 from spirl.components.params import get_args
 
 def fun_save_path(args):
@@ -34,19 +35,22 @@ if __name__ == "__main__":
     2. server-side parameter evaluation
     """
     args = get_args()
-    init_model = ModelTrainer(args=args)
-    num_clients = 4
-    num_rounds = 500
+    init_model = BaseClients(args=args)
+    num_clients = 2
+    num_rounds = 3
     # Parse command line argument `partition`
     #parser = argparse.ArgumentParser(description="Flower")
 
     model_parameters = [val.cpu().numpy() for _, val in init_model.model.state_dict().items()]
     save_dir = fun_save_path(args=args)
-    del init_model
+    #del init_model
 
     # Create strategy
-    strategy = SM_FedYogi(
+    strategy = FedDYN(
+        dyn_alpha = 0.1,
+        n_clients = num_clients,
         save_dir = save_dir,
+        #num_rounds = num_rounds,
         min_fit_clients=num_clients,
         min_evaluate_clients=num_clients,
         min_available_clients=num_clients,

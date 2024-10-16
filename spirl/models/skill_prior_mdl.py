@@ -320,6 +320,8 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
             loss = KLDivLoss(breakdown=0)(model_output.q.detach(), model_output.q_hat)
         # aggregate loss breakdown for each of the priors in the ensemble
         loss.breakdown = torch.stack([chunk.mean() for chunk in torch.chunk(loss.breakdown, self._hp.n_prior_nets)])
+        #call 함수를 이용해 조절
+        loss.weight = 0.01
         return loss
 
     def _get_beta_opt(self):

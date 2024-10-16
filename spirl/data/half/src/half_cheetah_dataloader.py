@@ -20,7 +20,7 @@ class D4RLSequenceSplitDataset(Dataset):
         self.remove_goal = self.spec.remove_goal if 'remove_goal' in self.spec else False
         self.dataset_size = dataset_size
         self.device = data_conf.device
-        self.n_worker = 0
+        self.n_worker = 2
         self.shuffle = shuffle
         self.dataset = self._get_filenames()
         
@@ -111,11 +111,14 @@ class D4RLSequenceSplitDataset(Dataset):
         data = {}
         def recursive_copy(group, dest):
             for key, item in group.items():
-                if isinstance(item, h5py.Group):
+                if isinstance(item, h5py.Group):  # 그룹일 경우 재귀적으로 처리
                     dest[key] = {}
                     recursive_copy(item, dest[key])
-                elif isinstance(item, h5py.Dataset):
-                    dest[key] = item[:]
+                elif isinstance(item, h5py.Dataset):  # 데이터셋일 경우
+                    if item.shape == ():  # 스칼라 데이터셋일 경우
+                        dest[key] = item[()]  # 스칼라는 슬라이싱 없이 직접 복사
+                    else:
+                        dest[key] = item[:]
                     
         recursive_copy(file, data)
         return data
