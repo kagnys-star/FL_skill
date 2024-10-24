@@ -637,7 +637,6 @@ class SF_Clients(BaseClients):
         super().__init__(args)
         self.control_var = {key: np.zeros(val.cpu().numpy().shape) for key, val in self.model.state_dict().items()}
         # 클라이언트 제어 변수 c_i
-        self.server_control_var = cp.deepcopy(self.control_var)  # 서버로부터 받은 제어 변수 g
         initial_parameters = [val.cpu().numpy() for _, val in self.model.state_dict().items()]
         self.weight_shapes = list(map(lambda arr: arr.shape, initial_parameters))
 
@@ -647,7 +646,6 @@ class SF_Clients(BaseClients):
         for epoch in range(self._hp.num_epochs):
             self.train_epoch(epoch)
             self.global_epoch += 1
-            self.cnt += 1
 
 
     def train_epoch(self, epoch):
@@ -672,22 +670,18 @@ class SF_Clients(BaseClients):
             self.call_hooks(inputs, output, losses, epoch)
 
             ####client_drifit####
-            exception_list = ["num_batches_tracked", "p.0", "running_mean", "running_var" , "log_sigma"]
-            i_num = 0
+            exception_list = ["num_batches_tracked", "running_mean", "running_var" , "log_sigma"]
             for key , param in self.model.named_parameters():
                 if any(excep in key for excep in exception_list):  # Improved condition check
-                    i_num += 1
                     continue
                 if param.grad is not None:  # 그라디언트가 존재할 경우
-                    control_var_tensor = torch.tensor(self.control_var[key], device=self.device)
-                    server_control_var_tensor = torch.tensor(self.server_control_var[key], device=self.device)
+                    delta_control_variates = torch.tensor(self.delta_control_variates[key], device=self.device, dtype=param.grad.dtype)
                     # 크기 출력
                     #print(key)
                     #print(f"control_var_tensor shape: {control_var_tensor.shape}, server_control_var_tensor shape: {server_control_var_tensor.shape}, param.grad shape: {param.grad.shape}")
                     
                     # 보정 연산 수행
-                    param.grad += (control_var_tensor - server_control_var_tensor) * self._hp.lr
-                    i_num += 1
+                    param.grad += delta_control_variates
             if self.global_step < self._hp.init_grad_clip_step:
             # clip gradients in initial steps to avoid NaN gradients
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self._hp.init_grad_clip)
@@ -721,15 +715,17 @@ class SF_Clients(BaseClients):
 
             del output, losses
             self.global_step = self.global_step + 1
-
+            self.cnt += 1
 
     def set_parameters(self, parameters):
         server_weights = parameters[ : len(self.weight_shapes)]
         server_covariates = parameters[len(self.weight_shapes) : ]
         super().set_parameters(server_weights)
-        for i, key in enumerate(self.server_control_var.keys()):
-                self.server_control_var[key] = server_covariates[i]
         self.global_weights = cp.deepcopy(self.model.state_dict())
+        self.delta_control_variates = cp.deepcopy(self.control_var)
+        for i, key in enumerate(self.delta_control_variates.keys()):
+                self.delta_control_variates[key] = server_covariates[i] - self.control_var[key]
+
 
 
     def fit(self, parameters, config):
@@ -742,13 +738,23 @@ class SF_Clients(BaseClients):
     def update_control_variate(self):
         state_dict = self.model.state_dict()
         control_var_plus = cp.deepcopy(self.global_weights)
-        delta_control_var = cp.deepcopy(self.control_var)
+        updated_client_control_variates = cp.deepcopy(self.control_var)
+        exception_list = ["log_sigma", "num_batches_tracked", "running_mean" , "running_var"]
+        scaling_coefficient = 1 / (self.cnt * self._hp.lr)
+        self.logger.log_scalar(scaling_coefficient , "scaling_coefficient", self.global_step, phase = 'train')
         for key in state_dict.keys():
-            control_var_plus[key] = self.control_var[key] - self.server_control_var[key] + (self.global_weights[key].cpu().numpy() - state_dict[key].cpu().numpy()) / (self.cnt * self._hp.lr)
-            delta_control_var[key] = control_var_plus[key] - self.control_var
+            if any(excep in key for excep in exception_list): 
+                control_var_plus[key] = np.zeros(self.control_var[key].shape)
+                updated_client_control_variates[key] = np.zeros(self.control_var[key].shape)
+            else:
+                control_var_plus[key] = scaling_coefficient * (self.global_weights[key].cpu().numpy() - state_dict[key].cpu().numpy()) - self.delta_control_variates[key]
+                updated_client_control_variates[key] = control_var_plus[key] - self.control_var[key]
         self.control_var = control_var_plus
-        weights = [val.cpu().numpy() for _, val in self.model.state_dict().items()] + [val for _, val in delta_control_var.items()]
-        return weights
+        #file_name = f"c_i_client_{self.client_num}-{self.global_epoch}.pickle"
+        #with open(file_name,'wb') as fw:
+        #    pickle.dump(self.control_var, fw)
+
+        return [val.cpu().numpy() for _, val in self.model.state_dict().items()] + [val for _, val in updated_client_control_variates.items()]
 
 
 class FS_Clients(BaseClients):
@@ -838,14 +844,18 @@ class FS_Clients(BaseClients):
     def set_parameters(self, parameters):
         super().set_parameters(parameters)
         self.global_weights = cp.deepcopy(self.model.state_dict())
-        self.minimizer.update_global_params(self.global_weights)
+        if self._hp.minimizer == "ASOL":
+            self.minimizer.update_global_params(self.global_weights)
 
 
-class FS_Clients(FP_Clients):
+class FD_Clients(FP_Clients):
 
     def __init__(self, args):
         super().__init__(args)
+        #local_grad 1번식과 2번식을 위해 구해야하는 것
         self.local_grads = cp.deepcopy(self.model.state_dict())
+        for key in self.local_grads:
+            self.local_grads[key].zero_()  
         #self.global_weights = cp.deepcopy(self.model_test.state_dict())
         #self.caculate_grad(self.local_grads)
         #self.train()
@@ -853,19 +863,20 @@ class FS_Clients(FP_Clients):
 
     def add_loss_drift(self,losses):
         
-        if self._hp.mu == 0:
+        if self._hp.mu == 0: 
             return losses
         
-        local_weights = self.model.state_dict()
-        exception_list = ["num_batches_tracked", "running_mean", "running_var"]
+        exception_list = ["num_batches_tracked", "running_mean", "running_var" , "log_sigma" ]
         lin_penalty = 0.0
         sq_penalty = 0.0
-        for key ,params in local_weights.items():
+        for key ,params in self.model.state_dict().items():
             if any(excep in key for excep in exception_list):  # Improved condition check
                 continue
             # Collect tensors in lists
+            #caculate correct loss functions, we need linear penalty and sq_penalty
+            # 식 1번
             lin_penalty += torch.sum(torch.mul(self.local_grads[key], params))
-            sq_penalty += torch.sum(torch.square(self.global_weights[key] - params))
+            sq_penalty += torch.sum(torch.norm(self.global_weights[key] - params, 2))
         losses.lin_penalty  = AttrDict(value=lin_penalty, weight=-1)
         losses.sq_penalty = AttrDict(value=sq_penalty, weight=(self._hp.mu/2))
         if hasattr(losses, 'total'):
@@ -874,12 +885,19 @@ class FS_Clients(FP_Clients):
         return losses
 
 
+    def fit(self, parameters, config):
+        self.set_parameters(parameters)
+        if "learning_rate" in config:
+            self.optimizer.set_lr(config["learning_rate"])
+        self.train()
+        self.caculate_grad()
+        return self.get_parameters(config), len(self.train_loader), {}
+
     def set_parameters(self, parameters):
         super().set_parameters(parameters)
         self.global_weights = cp.deepcopy(self.model.state_dict())
-        self.caculate_grad(self.local_grads)
 
-
-    def caculate_grad(self, local_grads):
+#식 2번째
+    def caculate_grad(self):
         for key, param in self.model.state_dict().items() :
-            local_grads[key] = self._hp.mu *(self.global_weights[key] - param)
+            self.local_grads[key] -= self._hp.mu *(self.global_weights[key] - param)

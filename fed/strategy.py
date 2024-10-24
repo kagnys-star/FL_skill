@@ -454,8 +454,13 @@ class Scaffold(FedAvg):
         weights_aggregated = aggregate(weights_results)
         # equation (5)(ii) - Scaffold paper
         # similar trick as previously - no need to use previous server covariates
-        server_covariates = list(np.sum(list(self.clients_covariates.values()), axis=0) / len(self.clients_covariates))
-        parameters_aggregated = self._pack_weights_and_covariates(weights_aggregated, server_covariates)
+        client_covar = list(np.sum(list(self.clients_covariates.values()), axis=0) / len(self.clients_covariates))
+        new_server_covariates = [
+            x + y for x, y in zip(self.covariates, client_covar)
+        ]
+        
+        parameters_aggregated = self._pack_weights_and_covariates(weights_aggregated, new_server_covariates)
+        self.covariates = new_server_covariates
 
         if (weights_aggregated is not None) and (server_round % 5 == 0):
             # Convert `Parameters` to `List[np.ndarray]`
@@ -463,56 +468,6 @@ class Scaffold(FedAvg):
             np.savez(os.path.join(self.save_dir,f"round-{server_round}-weights.npz"), *weights_aggregated)
 
         return parameters_aggregated, {}
-    '''
-    def configure_fit(
-        self, server_round: int, parameters: Parameters, client_manager
-    ) -> List[Tuple[ClientProxy, FitIns]]:
-        """Configure the next round of training."""
-        # unpack parameters
-        weights, server_covariates = self._unpack_parameters(parameters)
-
-        # Sample clients
-        sample_size, min_num_clients = self.num_fit_clients(
-            client_manager.num_available()
-        )
-        clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients
-        )
-
-        # Create custom params per client
-        fit_configurations = []
-        for client in clients:
-            # we need to send client_covariates specific to each client
-            client_covariates = self.clients_covariates.get(client.cid, self.covariates_zero)
-            parameters = self._pack_weights_and_covariates(weights, server_covariates)
-            fit_configurations.append((client, FitIns(parameters, self.train_config)))
-
-        return fit_configurations
-    
-    def configure_evaluate(
-        self, server_round: int, parameters: Parameters, client_manager
-    ) -> List[Tuple[ClientProxy, EvaluateIns]]:
-        """Configure the next round of evaluation."""
-        # unpack parameters
-        weights, _ = self._unpack_parameters(parameters)
-        
-        if self.fraction_evaluate == 0.0:
-            return []
-
-        # for local evaluation, we don't need server_covariates neither client_covariates
-        evaluate_ins = EvaluateIns(ndarrays_to_parameters(weights), self.evaluate_config)
-
-        # Sample clients
-        sample_size, min_num_clients = self.num_evaluation_clients(
-            client_manager.num_available()
-        )
-        clients = client_manager.sample(
-            num_clients=sample_size, min_num_clients=min_num_clients
-        )
-
-        # Return client/config pairs
-        return [(client, evaluate_ins) for client in clients]
-        '''
 
     def _check_shapes(self, weights_and_covariates: NDArrays) -> None:
         """Given a list of numpy arrays checks whether they have a repeating pattern of given shapes"""
@@ -527,7 +482,7 @@ class FedSOL(SM_FedAVG):
         super().__init__(*args, **kwargs)
 
 
-class FedDYN(SM_FedAVG):
+class Feddyn(SM_FedAVG):
     def __init__(self, dyn_alpha, n_clients, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.dyn_alpha = dyn_alpha
