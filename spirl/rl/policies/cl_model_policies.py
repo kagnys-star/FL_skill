@@ -42,6 +42,7 @@ class ClModelPolicy(Policy):
     def _compute_action_dist(self, obs):
         assert len(obs.shape) == 2
         split_obs = self._split_obs(obs)
+
         if obs.shape[0] == 1:
             # during rollouts use HL z every H steps and execute LL policy every step
             if self.steps_since_hl > self.horizon - 1:

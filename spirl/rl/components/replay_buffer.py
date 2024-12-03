@@ -192,12 +192,13 @@ class SuccessRateRolloutStorage(RolloutStorage):
     def rollout_stats(self):
         """Returns AttrDict of average statistics over the rollouts."""
         assert self.rollouts    # rollout storage should not be empty
-        stats = RecursiveAverageMeter()
+        results = super().rollout_stats()
+        success = 0
         for rollout in self.rollouts:
-            stats.update(AttrDict(
-                avg_reward=np.stack(rollout.done).sum()
-            ))
-        return stats.avg
+            if rollout.info[-1][0]['success'] == 1 :
+                success += 1
+        results.success = success / len(self.rollouts)
+        return results
 
 
 class accuracy_RolloutStorage(RolloutStorage):

@@ -4,16 +4,19 @@ import numpy as np
 from contextlib import contextmanager
 import torch
 import torch.nn as nn
+from collections import defaultdict
 from torch.utils.data import DataLoader
 from torch.utils.data import Sampler
 from torch.nn.parallel._functions import Gather
-from torch.optim.optimizer import Optimizer
+from torch.optim.optimizer import Optimizer , required
 from torch.nn.modules import BatchNorm1d, BatchNorm2d, BatchNorm3d
 from torch.nn.functional import interpolate
-
+from torch.nn.modules.batchnorm import _BatchNorm
+import torch.nn.functional as F
+import copy
 from spirl.utils.general_utils import batchwise_assign, map_dict, AttrDict, AverageMeter, map_recursive, remove_spatial
 from spirl.utils import ndim
-
+from typing import Dict
 
 class LossSpikeHook:
     def __init__(self, loss_name):
@@ -621,6 +624,314 @@ def update_optimizer_lr(optimizer, lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
+class ASAM:
+    def __init__(self, optimizer, model, rho=0.05, eta=0.01):
+        self.optimizer = optimizer
+        self.model = model
+        self.rho = rho
+        self.eta = eta
+        self.state = defaultdict(dict)
+
+    @torch.no_grad()
+    def ascent_step(self):
+        wgrads = []
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            t_w = self.state[p].get("eps")
+            if t_w is None:
+                t_w = torch.clone(p).detach()
+                self.state[p]["eps"] = t_w
+            if 'weight' in n:   
+                t_w[...] = p[...]
+                t_w.abs_().add_(self.eta)
+                p.grad.mul_(t_w)
+            wgrads.append(torch.norm(p.grad, p=2))
+        wgrad_norm = torch.norm(torch.stack(wgrads), p=2) + 1.e-16
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            t_w = self.state[p].get("eps")
+            if 'weight' in n:
+                p.grad.mul_(t_w)
+            eps = t_w
+            eps[...] = p.grad[...]
+            eps.mul_(self.rho / wgrad_norm)
+            p.add_(eps)
+        self.optimizer.zero_grad()
+
+    @torch.no_grad()
+    def descent_step(self):
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            p.sub_(self.state[p]["eps"])
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+
+
+class SAM(ASAM):
+    @torch.no_grad()
+    def ascent_step(self):
+        grads = []
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            grads.append(torch.norm(p.grad, p=2))
+        grad_norm = torch.norm(torch.stack(grads), p=2) + 1.e-16
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            eps = self.state[p].get("eps")
+            if eps is None:
+                eps = torch.clone(p).detach()
+                self.state[p]["eps"] = eps
+            eps[...] = p.grad[...]
+            eps.mul_(self.rho / grad_norm)
+            p.add_(eps)
+        self.optimizer.zero_grad()
+
+
+class ASOL(ASAM):
+    def __init__(self, global_param_dict ,*args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.global_param_dict = global_param_dict  # Global model (ref_param)
+        
+    
+    @torch.no_grad()
+    def ascent_step(self):
+        grads = []
+        scaling_vectors = {}
+        # Get global model parameters for reference
+
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            global_p = self.global_param_dict.get(n, None)
+            if global_p is None:
+                continue  # Skip if no global model parameter is available
+            discrepancy = p - global_p
+            scaling_vectors[n] = discrepancy / (discrepancy.norm(p=2) + 1e-16)
+            grads.append(torch.norm(p.grad, p=2))
+        grad_norm = torch.norm(torch.stack(grads), p=2) + 1.e-16
+
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            global_p = self.global_param_dict.get(n, None)
+            if global_p is None:
+                continue  # Skip if no global model parameter is available
+            eps = self.state[p].get("eps")
+            if eps is None:
+                eps = torch.clone(p).detach()
+                self.state[p]["eps"] = eps
+            eps[...] = p.grad[...]
+            eps.mul_(self.rho / grad_norm * scaling_vectors[n])
+            p.add_(eps)  # Apply the perturbation
+
+        self.optimizer.zero_grad()
+
+    def update_global_params(self,params):
+        self.global_param_dict = params 
+
+
+class SAM_opt(torch.optim.Optimizer):
+    def __init__(self, params, base_optimizer, rho=0.05, adaptive=False, **kwargs):
+        assert rho >= 0.0, f"Invalid rho, should be non-negative: {rho}"
+
+        defaults = dict(rho=rho, adaptive=adaptive, **kwargs)
+        super(SAM_opt, self).__init__(params, defaults)
+
+        self.base_optimizer = base_optimizer
+        self.param_groups = self.base_optimizer.param_groups
+        self.defaults.update(self.base_optimizer.defaults)
+        self.adaptive = adaptive
+        self.rho = rho
+
+    @torch.no_grad()
+    def ascent_step(self, zero_grad=False):
+        grad_norm = self._grad_norm()
+        for group in self.param_groups:
+            scale = self.rho / (grad_norm + 1e-12)
+
+            for p in group["params"]:
+                if p.grad is None: continue
+                self.state[p]["old_p"] = p.data.clone()
+                e_w = (torch.pow(p, 2) if self.adaptive else 1.0) * p.grad * scale.to(p)
+                p.add_(e_w)  # climb to the local maximum "w + e(w)"
+
+        if zero_grad: self.zero_grad()
+
+    @torch.no_grad()
+    def descent_step(self, zero_grad=False):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None: continue
+                p.data = self.state[p]["old_p"]  # get back to "w" from "w + e(w)"
+
+        self.base_optimizer.step()  # do the actual "sharpness-aware" update
+
+        if zero_grad: self.zero_grad()
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        assert closure is not None, "Sharpness Aware Minimization requires closure, but it was not provided"
+        closure = torch.enable_grad()(closure)  # the closure should do a full forward-backward pass
+
+        self.ascent_step(zero_grad=True)
+        closure()
+        self.descent_step()
+
+    def _grad_norm(self):
+        shared_device = self.param_groups[0]["params"][0].device  # put everything on the same device, in case of model parallelism
+        norm = torch.norm(
+                    torch.stack([
+                        ((torch.abs(p) if self.adaptive else 1.0) * p.grad).norm(p=2).to(shared_device)
+                        for group in self.param_groups for p in group["params"]
+                        if p.grad is not None
+                    ]),
+                    p=2
+               )
+        return norm
+
+    def load_state_dict(self, state_dict):
+        super().load_state_dict(state_dict)
+        self.base_optimizer.param_groups = self.param_groups
+
+    def set_lr(self, lr):
+        """Set the learning rate for the base optimizer."""
+        for param_group in self.base_optimizer.param_groups:
+            param_group['lr'] = lr
+
+
+def disable_running_stats(model):
+    def _disable(module):
+        if isinstance(module, _BatchNorm):
+            module.backup_momentum = module.momentum
+            module.momentum = 0
+
+    model.apply(_disable)
+
+def enable_running_stats(model):
+    def _enable(module):
+        if isinstance(module, _BatchNorm) and hasattr(module, "backup_momentum"):
+            module.momentum = module.backup_momentum
+
+    model.apply(_enable)
+
+
+class ExpSAM(torch.optim.Optimizer):
+    def __init__(
+        self, params, base_optimizer, rho=0.05, adaptive=False, **kwargs
+    ):
+        # assert rho >= 0.0, f"Invalid rho, should be non-negative: {rho}"
+
+        defaults = dict(rho=rho, adaptive=adaptive, **kwargs)
+        super(ExpSAM, self).__init__(params, defaults)
+
+        self.base_optimizer = base_optimizer
+        self.param_groups = self.base_optimizer.param_groups
+
+        self.ref_param_groups = copy.deepcopy(self.param_groups)
+
+        self.defaults.update(self.base_optimizer.defaults)
+        self.rho = rho
+
+    @torch.no_grad()
+    def ascent_step(self, zero_grad=False):
+        grad_norm = self._grad_norm()
+        for group, ref_group in zip(self.param_groups, self.ref_param_groups):
+            scale = self.rho / (grad_norm + 1e-12)
+
+            for p, ref_p in zip(group["params"], ref_group["params"]):
+                if p.grad is None:
+                    try:
+                        self.state[p]["old_p"] = p.data.clone()
+                    except:
+                        pass
+
+                    continue
+
+                # avg_mag = torch.abs(p - ref_p).mean()
+
+                self.state[p]["old_p"] = p.data.clone()
+                e_w = F.normalize((p - ref_p).abs(), 2, dim=0) * p.grad * scale.to(p)
+                p.add_(e_w)  # climb to the local maximum "w + e(w)"
+
+        if zero_grad:
+            self.zero_grad()
+        
+    @torch.no_grad()
+    def descent_step (self, zero_grad=False):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                p.data = self.state[p]["old_p"]  # get back to "w" from "w + e(w)"
+
+        self.base_optimizer.step()  # do the actual "sharpness-aware" update
+
+        if zero_grad:
+            self.zero_grad()
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        assert (
+            closure is not None
+        ), "Sharpness Aware Minimization requires closure, but it was not provided"
+        closure = torch.enable_grad()(
+            closure
+        )  # the closure should do a full forward-backward pass
+
+        self.first_step(zero_grad=True)
+        closure()
+        self.second_step()
+
+    def _grad_norm(self):
+        shared_device = self.param_groups[0]["params"][
+            0
+        ].device  # put everything on the same device, in case of model parallelism
+        norm = torch.norm(
+            torch.stack(
+                [
+                    (1.0 * p.grad).norm(p=2).to(shared_device)
+                    for group, ref_group in zip(
+                        self.param_groups, self.ref_param_groups
+                    )
+                    for p, ref_p in zip(group["params"], ref_group["params"])
+                    if p.grad is not None
+                ]
+            ),
+            p=2,
+        )
+        return norm
+
+    def load_state_dict(self, state_dict):
+        super().load_state_dict(state_dict)
+        self.base_optimizer.param_groups = self.param_groups
+
+    def add_ref_param_group(self, param_group):
+        params = param_group["params"]
+
+        if isinstance(params, torch.Tensor):
+            param_group["params"] = [params]
+        else:
+            param_group["params"] = list(params)
+
+        for name, default in self.defaults.items():
+            param_group.setdefault(name, default)
+
+        params = param_group["params"]
+
+        param_set = set()
+        for group in self.ref_param_groups:
+            param_set.update(set(group["params"]))
+
+        if not param_set.isdisjoint(set(param_group["params"])):
+            raise ValueError("some parameters appear in more than one parameter group")
+
+        self.ref_param_groups.append(param_group)
+
 
 if __name__ == '__main__':
     # test stacking+padding for tensors/np_arrays
@@ -639,65 +950,3 @@ if __name__ == '__main__':
         upd.step()
         
     print(x)
-
-    
-class SAM(Optimizer):
-    def __init__(self, params, base_optimizer, rho=0.05, adaptive=False, **kwargs):
-        assert rho >= 0.0, f"Invalid rho, should be non-negative: {rho}"
-
-        defaults = dict(rho=rho, adaptive=adaptive, **kwargs)
-        super(SAM, self).__init__(params, defaults)
-
-        self.base_optimizer = base_optimizer(self.param_groups, **kwargs)
-        self.param_groups = self.base_optimizer.param_groups
-        self.defaults.update(self.base_optimizer.defaults)
-
-    @torch.no_grad()
-    def first_step(self, zero_grad=False):
-        grad_norm = self._grad_norm()
-        for group in self.param_groups:
-            scale = group["rho"] / (grad_norm + 1e-12)
-
-            for p in group["params"]:
-                if p.grad is None: continue
-                self.state[p]["old_p"] = p.data.clone()
-                e_w = (torch.pow(p, 2) if group["adaptive"] else 1.0) * p.grad * scale.to(p)
-                p.add_(e_w)  # climb to the local maximum "w + e(w)"
-
-        if zero_grad: self.zero_grad()
-
-    @torch.no_grad()
-    def second_step(self, zero_grad=False):
-        for group in self.param_groups:
-            for p in group["params"]:
-                if p.grad is None: continue
-                p.data = self.state[p]["old_p"]  # get back to "w" from "w + e(w)"
-
-        self.base_optimizer.step()  # do the actual "sharpness-aware" update
-
-        if zero_grad: self.zero_grad()
-
-    @torch.no_grad()
-    def step(self, closure=None):
-        assert closure is not None, "Sharpness Aware Minimization requires closure, but it was not provided"
-        closure = torch.enable_grad()(closure)  # the closure should do a full forward-backward pass
-
-        self.first_step(zero_grad=True)
-        closure()
-        self.second_step()
-
-    def _grad_norm(self):
-        shared_device = self.param_groups[0]["params"][0].device  # put everything on the same device, in case of model parallelism
-        norm = torch.norm(
-                    torch.stack([
-                        ((torch.abs(p) if group["adaptive"] else 1.0) * p.grad).norm(p=2).to(shared_device)
-                        for group in self.param_groups for p in group["params"]
-                        if p.grad is not None
-                    ]),
-                    p=2
-               )
-        return norm
-
-    def load_state_dict(self, state_dict):
-        super().load_state_dict(state_dict)
-        self.base_optimizer.param_groups = self.param_groups

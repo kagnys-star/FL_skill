@@ -22,6 +22,7 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
 )
+import pickle
 
 
 class SM_FedYogi(FedYogi):
@@ -300,20 +301,20 @@ class FEDASAM_opt(FedAvg):
 
 class FedNova(FedAvg):
     """FedNova."""
-    def __init__(self, lr, gmf , *args, **kwargs):
+    def __init__(self, save_dir, lr , gmf , *args, **kwargs):
         super().__init__(*args, **kwargs)
-
+        self.save_dir = save_dir
+        os.makedirs(self.save_dir, exist_ok=True)
+        self.lr = lr
         # Maintain a momentum buffer for the weight updates across rounds of training
         self.global_momentum_buffer: List[NDArray] = []
         if self.initial_parameters is not None:
             self.global_parameters: List[NDArray] = parameters_to_ndarrays(
                 self.initial_parameters
             )
-
-        self.lr = lr
-
         # momentum parameter for the server/strategy side momentum buffer
         self.gmf = gmf
+
 
     def aggregate_fit(
         self,
@@ -329,31 +330,34 @@ class FedNova(FedAvg):
         if not self.accept_failures and failures:
             return None, {}
 
-        # Compute tau_effective from summation of local client tau: Eqn-6: Section 4.1
-        local_tau = [res.metrics["tau"] for _, res in results]
-        tau_eff = np.sum(local_tau)
+        # 전체 클라이언트의 데이터 크기를 합산
+        total_data_size = np.sum([fit_res.num_examples for _, fit_res in results])
+
+        # tau_eff 계산: 각 클라이언트의 tau 값에 데이터 비율을 곱한 후 합산
+        local_tau = [res.metrics["tau"] * (res.num_examples / total_data_size) for _, res in results]
+        tau_eff = np.sum(local_tau)  # 데이터 비율을 고려한 tau_eff 계산
 
         aggregate_parameters = []
 
-        for _client, res in results:
+        for _, res in results:
             params = parameters_to_ndarrays(res.parameters)
-            # compute the scale by which to weight each client's gradient
-            # res.metrics["local_norm"] contains total number of local update steps
-            # for each client
-            # res.metrics["weight"] contains the ratio of client dataset size
-            # Below corresponds to Eqn-6: Section 4.1
-            scale = tau_eff / float(res.metrics["local_norm"])
-            scale *= float(res.metrics["weight"])
+            client_data_size = res.num_examples  # 각 클라이언트의 데이터 크기
 
+            # 데이터 비율 계산 (전체 데이터 대비 클라이언트 데이터 비율)
+            data_ratio = client_data_size / total_data_size
+            
+            # tau_eff와 데이터 비율을 기반으로 가중치 조정
+            scale = tau_eff * res.metrics["tau"] * data_ratio  # 데이터 비율을 적용한 스케일링
             aggregate_parameters.append((params, scale))
 
-        # Aggregate all client parameters with a weighted average using the scale
-        # calculated above
+        # 클라이언트의 파라미터를 가중치 평균으로 합산
         agg_cum_gradient = aggregate(aggregate_parameters)
 
-        # In case of Server or Hybrid Momentum, we decay the aggregated gradients
-        # with a momentum factor
+        # 서버 파라미터 업데이트
         self.update_server_params(agg_cum_gradient)
+        if (self.global_parameters is not None) and (server_round % 5 == 0):
+            # Save aggregated_ndarrays
+            np.savez(os.path.join(self.save_dir,f"round-{server_round}-weights.npz"), *self.global_parameters)
 
         return ndarrays_to_parameters(self.global_parameters), {}
 
@@ -374,14 +378,166 @@ class FedNova(FedAvg):
                     self.global_momentum_buffer[i] *= self.gmf
                     self.global_momentum_buffer[i] += layer_cum_grad / self.lr
 
+                self.global_parameters[i] = self.global_parameters[i].astype(np.float64)
                 self.global_parameters[i] -= self.global_momentum_buffer[i] * self.lr
 
             else:
                 # weight updated eqn: x_new = x_old - gradient
                 # the layer_cum_grad already has all the learning rate multiple
+                self.global_parameters[i] = self.global_parameters[i].astype(np.float64)
                 self.global_parameters[i] -= layer_cum_grad
 
 
-class Fed(FedAvg):
-    def __init__(self,**kwargs) -> None:
-        super().__init__(**kwargs)
+class Scaffold(FedAvg):
+
+    def __init__(self, save_dir, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.save_dir = save_dir
+        os.makedirs(self.save_dir, exist_ok=True)
+        #Scaffold specific variables
+        self.global_weighs = parameters_to_ndarrays(self.initial_parameters)
+        self.weight_shapes = list(map(lambda arr: arr.shape, self.global_weighs))
+        self.covariates = [np.zeros(shape) for shape in self.weight_shapes]
+        #store client_covariates on server side because clients are generated on demand. Instead of each client holding its state
+        # as the Scaffold paper describes, we store the client_covariates on server side. This of course can be changed.
+        self.clients_covariates: Dict[str, NDArrays] = {} # cid -> client_covariates
+        self.covariates_zero = [np.zeros(shape) for shape in self.weight_shapes] # initial client covariates
+
+
+
+    def initialize_parameters(
+        self, client_manager
+    ) -> Optional[Parameters]:
+        """Initialize global model parameters."""
+        return self._pack_weights_and_covariates(self.global_weighs, self.covariates)
+
+    def _unpack_parameters(self, parameters: Parameters) -> Tuple[NDArrays, NDArrays]:
+        """Extract weights and covariates from parameters"""
+        weights_and_covariates = parameters_to_ndarrays(parameters)
+        self._check_shapes(weights_and_covariates)
+        weights = weights_and_covariates[:len(self.weight_shapes)]
+        covariates = weights_and_covariates[len(self.weight_shapes):]
+        return weights, covariates
+
+    def _pack_weights_and_covariates(
+        self, 
+        weights: NDArrays, 
+        server_covariates: Optional[NDArrays] = None,
+      ) -> Parameters:
+        """Convert weights and covariates to parameters"""
+        weights_and_covariates = (
+            weights 
+          + (server_covariates if server_covariates is not None else [])
+        )
+        self._check_shapes(weights_and_covariates)
+        return ndarrays_to_parameters(weights_and_covariates)
+
+    def aggregate_fit(
+        self,
+        server_round: int,
+        results: List[Tuple[ClientProxy, FitRes]],
+        failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
+    ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
+        """Aggregate fit results using weighted average."""
+
+        if not results:
+            return None, {}
+
+        # Do not aggregate if there are failures and failures are not accepted
+        if not self.accept_failures and failures:
+            return None, {}
+
+        weights_results = []
+        for client_proxy, fit_res in results:
+          weights, delta_c = self._unpack_parameters(fit_res.parameters)
+          self.clients_covariates[client_proxy.cid] = delta_c
+          weights_results.append((weights, fit_res.num_examples))
+
+        # equation (5)(i) - Scaffold paper
+        # no need to use previous weights because the server learning rate is 1 
+        # and so mathematically the update depends only on the updated weights from clients
+        weights_aggregated = aggregate(weights_results)
+        # equation (5)(ii) - Scaffold paper
+        # similar trick as previously - no need to use previous server covariates
+
+        client_covar = []
+        client_covar = list(np.sum(list(self.clients_covariates.values()), axis=0) / len(self.clients_covariates))
+        new_server_covariates = [
+            x + y for x, y in zip(self.covariates, client_covar)
+        ]
+        parameters_aggregated = self._pack_weights_and_covariates(weights_aggregated, new_server_covariates)
+        #with open(f"server_control_variate-{server_round}.pickle",'wb') as fw:
+        #    pickle.dump(server_covariates, fw)
+        self.global_weighs = weights_aggregated
+        self.covariates = new_server_covariates
+        if (weights_aggregated is not None) and (server_round % 5 == 0):
+            # Convert `Parameters` to `List[np.ndarray]`
+            # Save aggregated_ndarrays
+            np.savez(os.path.join(self.save_dir,f"round-{server_round}-weights.npz"), *weights_aggregated)
+
+        return parameters_aggregated, {}
+
+
+    def _check_shapes(self, weights_and_covariates: NDArrays) -> None:
+        """Given a list of numpy arrays checks whether they have a repeating pattern of given shapes"""
+        assert len(weights_and_covariates) % len(self.weight_shapes) == 0
+        for i in range(len(weights_and_covariates)):
+            expected_shape = self.weight_shapes[i % len(self.weight_shapes)]
+            assert weights_and_covariates[i].shape == expected_shape
+
+
+class FedSOL(SM_FedAVG):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+class FedDyn(SM_FedAVG):
+    def __init__(self, dyn_alpha, n_clients, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dyn_alpha = dyn_alpha
+        self.h_t = [np.array(param, dtype=np.float64) for param in parameters_to_ndarrays(self.initial_parameters)]
+        self.global_parameters = [np.array(param, dtype=np.float64) for param in parameters_to_ndarrays(self.initial_parameters)]
+        self.n_clients = n_clients
+
+    def aggregate_fit(
+        self,
+        server_round: int,
+        results: List[Tuple[ClientProxy, FitRes]],
+        failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
+    ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
+        """Aggregate fit results using weighted average."""
+
+        aggregated_parameters, aggregated_metrics = super().aggregate_fit(server_round, results, failures)
+        '''
+        if not results:
+            return None, {}
+
+        # Do not aggregate if there are failures and failures are not accepted
+        if not self.accept_failures and failures:
+            return None, {}
+        
+        # Step 1: Update h_t using client updates
+        aggregate_parameters = []
+        total_data_size = np.sum([fit_res.num_examples for _, fit_res in results])
+        for _, fit_res in results:
+            params = parameters_to_ndarrays(fit_res.parameters)
+            data_ratio = fit_res.num_examples / total_data_size
+            aggregate_parameters.append((params, data_ratio))
+            for i , layers in enumerate(params):
+                self.h_t[i] -= (self.dyn_alpha / self.n_clients) * (layers - self.global_parameters[i])
+        
+        agg_cum_gradient = aggregate(aggregate_parameters)
+        # Step 2: Use only h_t to update the global weights
+        for _, fit_res in results:
+            for i , layers in enumerate(agg_cum_gradient):
+                self.global_parameters[i] = layers - (1.0/ self.dyn_alpha) * self.h_t[i]
+        
+
+        if (self.global_parameters is not None) and (server_round % 5 == 0):
+            # Convert `Parameters` to `List[np.ndarray]`
+            aggregated_ndarrays: List[np.ndarray] = parameters_to_ndarrays(aggregated_parameters)
+            # Save aggregated_ndarrays
+            np.savez(os.path.join(self.save_dir,f"round-{server_round}-weights.npz"), *aggregated_ndarrays)
+        '''
+        
+        return aggregated_parameters, aggregated_metrics

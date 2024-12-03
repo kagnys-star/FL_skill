@@ -118,7 +118,7 @@ class RLTrainer:
                     'state_dict': self.agent.state_dict(),
                 }, os.path.join(self._hp.exp_path, 'weights'), CheckpointHandler.get_ckpt_name(epoch))
                 self.agent.save_state(self._hp.exp_path)
-                self.val(epoch)
+            self.val(epoch)
 
     def train_epoch(self, epoch):
         """Run inner training loop."""
@@ -151,30 +151,35 @@ class RLTrainer:
 
                 # log results
                 with timers['log'].time():
-                    if self.is_chef and self.log_outputs_now:
+                    if self.is_chef :
                         self.agent.log_outputs(agent_outputs, None, self.logger,
                                                log_images=False, step=self.global_step)
                         self.print_train_update(epoch, agent_outputs, timers)
 
     def val(self,epoch=0):
         """Evaluate agent."""
-        val_rollout_storage = RolloutStorage()
+        #val_rollout_storage = RolloutStorage()
+        val_rollout_storage = SuccessRateRolloutStorage()
         #val_rollout_storage= accuracy_RolloutStorage()
         with self.agent.val_mode():
             with torch.no_grad():
                 with timing("Eval rollout time: "):
-                    for _ in range(WandBLogger.N_LOGGED_SAMPLES):   # for efficiency instead of self.args.n_val_samples
+                    for _ in range(3):   # for efficiency instead of self.args.n_val_samples
                         val_rollout_storage.append(self.sampler.sample_episode(is_train=False, render=False))
-                        
-        rollout_stats = val_rollout_storage.rollout_stats()
-        #save_frames_as_video(val_rollout_storage)
-        if epoch == (self._hp.num_epochs - 1):
-            self.make_csv(rollout_stats.avg_reward)
+            rollout_stats = val_rollout_storage.rollout_stats()
+
+
         if self.is_chef:
             with timing("Eval log time: "):
+                self.agent._is_train = False
                 self.agent.log_outputs(rollout_stats, val_rollout_storage,
-                                       self.logger, log_images=False, step=self.global_step)
+                                    self.logger, log_images=False, step=self.global_step)
+                self.agent._is_train = True
+            if epoch == (self._hp.num_epochs - 1):
+                self.make_csv(rollout_stats)
             print("Evaluation Avg_Reward: {}".format(rollout_stats.avg_reward))
+            print("Evaluation success_rate: {}".format(rollout_stats.success))
+        #save_frames_as_video(val_rollout_storage)
 
         del val_rollout_storage
 
@@ -330,10 +335,12 @@ class RLTrainer:
     def use_multiple_workers(self):
         return self.conf.mpi.num_workers > 1
 
-    def make_csv(self, value):
-        file_path = os.path.join(self.conf.exp_dir, "val_result", self.args.csv)
+    def make_csv(self, results):
+        file_path = os.path.join(self.conf.exp_dir, "val_result","3_mix",self.args.csv)
         parent_dir = os.path.dirname(file_path)
-        rounds = str(self.args.prefix).split("_")[-1]
+        results.rounds = 300
+        dic_results = {key: [value] for key, value in results.items()}
+        #results.rounds = str(self.args.prefix).split("_")[-1]
 
         # 파일을 저장할 디렉토리가 존재하지 않으면 생성
         if not os.path.exists(parent_dir):
@@ -341,14 +348,15 @@ class RLTrainer:
         
         # 파일이 없으면 CSV 파일 생성
         if not os.path.exists(file_path):
-            df = pd.DataFrame(columns=['scores' , 'rounds' ])  # 원하는 컬럼명으로 DataFrame 생성
-            df = pd.concat([df, pd.DataFrame({'scores': [value] , 'rounds' : [rounds]})], ignore_index=True)
+            df = pd.DataFrame.from_dict(data=dic_results, orient='columns')
+            #df = pd.DataFrame(columns=['scores' , 'rounds' ])  # 원하는 컬럼명으로 DataFrame 생성
+            #df = pd.concat([df, pd.DataFrame({'scores': [value] , 'rounds' : [rounds]})], ignore_index=True)
             df.to_csv(file_path, index=False)
         else:
             # 파일이 있으면 파일 열기
             df = pd.read_csv(file_path)
             # 새로운 값을 추가
-            df = pd.concat([df, pd.DataFrame({'scores': [value] , 'rounds' : [rounds]})], ignore_index=True)
+            df = pd.concat([df, pd.DataFrame.from_dict(data=dic_results, orient='columns')], ignore_index=True)
             df.to_csv(file_path, index=False)
 
     

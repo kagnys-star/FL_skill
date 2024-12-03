@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
-from spirl.configs.default_data_configs.FL_kitchen import data_spec
+from spirl.configs.default_data_configs.metaworld import data_spec
 from spirl.components.evaluator import TopOfNSequenceEvaluator
 import os
 import datetime
@@ -236,8 +236,8 @@ def save_checkpoint(basemodel,folder):
 
 if __name__ == "__main__":
     model_config =AttrDict(
-        state_dim=21,
-        action_dim=6,
+        state_dim=data_spec.state_dim,
+        action_dim=data_spec.n_actions,
         n_rollout_steps=10,
         kl_div_weight=5e-4,
         nz_enc=128,
@@ -266,12 +266,29 @@ if __name__ == "__main__":
     #basemodel =  gl_numpy_model_load_change(config=model_config, init_path="/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/half_cheetah/fedprox/hetro3/weights/round-500-weights.npz")
     #save_checkpoint(basemodel,folder="/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/half_cheetah/fedprox/hetro3/weights")
     # 이 함수는 checkpoint에 다 다 집어 넣는 거다.
-    for i in range(50):
-        save_num = (i+1)*10
-        basemodel =  gl_numpy_model_load_change(config=model_config, init_path=f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/half_cheetah/fedadagrad/hetero2/weights/round-{save_num}-weights.npz")
-        save_path = f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/half_cheetah/fedadagrad/hetero2/repeat/{save_num}/weights"
-        save_checkpoint(basemodel,folder=save_path)
-
+    #exp_mode = ["fedavg","fedasam","fedprox","fednova","fedsol","feddyn"]
+    #data_type = ["iid","hetero3","hetero2"]
+    '''                
+    exp_mode = ["fedavg"]
+    data_type = ["hetero3"]
+    for exp in exp_mode:
+        for d_type in data_type:
+            folder_name = exp + "/" + d_type
+            for i in range(30):
+                save_num = (i+1)*10
+                basemodel =  gl_numpy_model_load_change(config=model_config, init_path=f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mt4/{folder_name}/weights/round-{save_num}-weights.npz")
+                save_path = f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mt4/{folder_name}/repeat/{save_num}/weights"
+                save_checkpoint(basemodel,folder=save_path)
+    '''
+    exp_mode = ["fedasam" ,"fednova" ,"fedsol", "feddyn"]
+    data_type = ["hetero4"]
+    for exp in exp_mode:
+        for d_type in data_type:
+            folder_name = exp + "/" + d_type
+            save_num = 300
+            basemodel =  gl_numpy_model_load_change(config=model_config, init_path=f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mt6/{folder_name}/weights/round-{save_num}-weights.npz")
+            save_path = f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mt6/{folder_name}/repeat/{save_num}/weights"
+            save_checkpoint(basemodel,folder=save_path)
     '''
     dataset_class = basemodel.conf.data.dataset_spec.dataset_class
     phase = 'val'

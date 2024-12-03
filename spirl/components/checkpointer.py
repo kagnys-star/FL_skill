@@ -38,7 +38,7 @@ class CheckpointHandler:
         return os.path.join(path, resume_file)
 
     @staticmethod
-    def load_weights(weights_file, model, load_step=False, load_opt=False, optimizer=None, strict=True):
+    def load_weights(weights_file, model, load_step=False, load_opt=False, optimizer=None, strict=False):
         success = False
         if os.path.isfile(weights_file):
             print(("=> loading checkpoint '{}'".format(weights_file)))

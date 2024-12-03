@@ -30,7 +30,9 @@ class WandBLogger:
             config=filtered_config,
             dir=path,
             entity=entity,
-            notes=conf.notes if 'notes' in conf else ''
+            notes=conf.notes if 'notes' in conf else '',
+            #mode="online",
+
         )
 
     def log_scalar_dict(self, d, prefix='', step=None):
@@ -97,5 +99,9 @@ class WandBLogger:
     def visualize(self, *args, **kwargs):
         """Subclasses can implement this method to visualize training results."""
         pass
+
+    
+    def alert(self, *args, **kwargs):
+        wandb.alert(*args, **kwargs)
 
 

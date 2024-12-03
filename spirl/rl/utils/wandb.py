@@ -7,7 +7,7 @@ from spirl.utils.general_utils import flatten_dict, prefix_dict
 
 class WandBLogger:
     """Logs to WandB."""
-    N_LOGGED_SAMPLES = 5    # how many examples should be logged in each logging step
+    N_LOGGED_SAMPLES = 10    # how many examples should be logged in each logging step
 
     def __init__(self, exp_name, project_name, entity, path, conf, exclude=None):
         """
@@ -28,7 +28,8 @@ class WandBLogger:
             config=filtered_config,
             dir=path,
             entity=entity,
-            notes=conf.notes if 'notes' in conf else ''
+            notes=conf.notes if 'notes' in conf else '',
+            #mode="offline",
         )
 
     def log_scalar_dict(self, d, prefix='', step=None):

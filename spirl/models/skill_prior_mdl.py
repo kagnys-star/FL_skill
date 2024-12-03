@@ -86,6 +86,7 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
             'reconstruction_mse_weight': 1.,    # weight of MSE reconstruction loss
             'kl_div_weight': 1.,                # weight of KL divergence loss
             'target_kl': None,                  # if not None, adds automatic beta-tuning to reach target KL divergence
+            'q_hat_weight' : 1e-2,
         })
 
         # loading pre-trained components
@@ -141,10 +142,10 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
                                             cond_inputs=self._learned_prior_input(inputs),
                                             steps=self._hp.n_rollout_steps,
                                             inputs=inputs)
-        output.q_reconstruction = self.decode(output.z_p,
-                                            cond_inputs=self._learned_prior_input(inputs),
-                                            steps=self._hp.n_rollout_steps,
-                                            inputs=inputs)
+        #output.q_reconstruction = self.decode(output.z_p,
+        #                                    cond_inputs=self._learned_prior_input(inputs),
+        #                                    steps=self._hp.n_rollout_steps,
+        #                                    inputs=inputs)
 
 
         return output
@@ -171,7 +172,6 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
         # Optionally update beta
         if self.training and self._hp.target_kl is not None:
             self._update_beta(losses.kl_loss.value)
-
         losses.total = self._compute_total_loss(losses)
         return losses
 
@@ -190,7 +190,7 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
         self._logger.log_scalar(model_output.q_hat.mu.mean(), "q_hat_mu", step, phase)
         self._logger.log_scalar(model_output.q.sigma.mean(), "q_sigma", step, phase)
         self._logger.log_scalar(model_output.q_hat.sigma.mean(), "q_hat_sigma", step, phase)
-        self._logger.log_scalar(mse(model_output.reconstruction,(model_output.q_reconstruction )), "prior_mse", step, phase)
+        #self._logger.log_scalar(mse(model_output.reconstruction,(model_output.q_reconstruction )), "prior_mse", step, phase)
 
         # log videos/gifs in tensorboard
         if log_images:
@@ -320,6 +320,7 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
             loss = KLDivLoss(breakdown=0)(model_output.q.detach(), model_output.q_hat)
         # aggregate loss breakdown for each of the priors in the ensemble
         loss.breakdown = torch.stack([chunk.mean() for chunk in torch.chunk(loss.breakdown, self._hp.n_prior_nets)])
+        loss.weight =  self._hp.q_hat_weight
         return loss
 
     def _get_beta_opt(self):
@@ -333,6 +334,33 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
         self._beta_opt.zero_grad()
         beta_loss.backward()
         self._beta_opt.step()
+
+
+    def update_cycle_beta(self, epoch) :
+        self._hp.kl_div_weight = self.beta_values[epoch]
+
+
+    def create_beta_cycle(self, start, stop, n_epoch, n_cycle=4, ratio=0.5):
+        self.beta_values = np.zeros(n_epoch)
+        period = n_epoch // n_cycle  # 정수로 보장
+        remaining = n_epoch % n_cycle  # 나머지 확인
+        step = 1 / (period * ratio)  # step은 비율에 따라 계산
+
+        for c in range(n_cycle):
+            v, i = 0, 0
+            while v <= 1 and i < period:
+                self.beta_values[int(i + c * period)] = start + (stop - start) * (0.5 - 0.5 * np.cos(v * np.pi))
+                v += step
+                i += 1
+
+            while i < period:
+                self.beta_values[int(i + c * period)] = stop
+                i += 1
+
+        # 나머지 처리
+        for i in range(remaining):
+            self.beta_values[-(i + 1)] = stop  # 남은 부분을 stop 값으로 채우기
+
 
     def _learned_prior_input(self, inputs):
         return inputs.states[:, 0]
