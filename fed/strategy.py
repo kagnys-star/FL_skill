@@ -8,7 +8,7 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple, Union
 from flwr.server.strategy import FedAvg , FedProx , FedAdam , FedAdagrad, FedYogi
 from flwr.server.client_proxy import ClientProxy
-from flwr.server.strategy.aggregate import aggregate
+from flwr.server.strategy.aggregate import aggregate , weighted_loss_avg
 from flwr.common import (
     EvaluateIns,
     EvaluateRes,
@@ -145,7 +145,7 @@ class SM_FedAVG(FedAvg):
         return aggregated_parameters, aggregated_metrics
 
 
-class FEDASAM(FedAvg):
+class FEDASAM(fl.server.strategy.Strategy):
     def __init__(self, save_dir, lr, num_rounds, swa_lr=1e-4, cycle_length=10, swa_start=0.75, **kwargs):
         super().__init__(**kwargs)
         self.save_dir = save_dir
@@ -156,6 +156,7 @@ class FEDASAM(FedAvg):
         self.lr = lr
         self.swa_lr = swa_lr
         self.swa_n = 0
+        self.initial_evaluation_done = False
 
 
     def schedule_cycling_lr(self, round):
@@ -316,6 +317,7 @@ class FedNova(FedAvg):
         self.gmf = gmf
 
 
+
     def aggregate_fit(
         self,
         server_round: int,
@@ -336,11 +338,25 @@ class FedNova(FedAvg):
         # tau_eff 계산: 각 클라이언트의 tau 값에 데이터 비율을 곱한 후 합산
         local_tau = [res.metrics["tau"] * (res.num_examples / total_data_size) for _, res in results]
         tau_eff = np.sum(local_tau)  # 데이터 비율을 고려한 tau_eff 계산
+        # 전체 클라이언트의 데이터 크기를 합산
+        total_data_size = np.sum([fit_res.num_examples for _, fit_res in results])
+
+        # tau_eff 계산: 각 클라이언트의 tau 값에 데이터 비율을 곱한 후 합산
+        local_tau = [res.metrics["tau"] * (res.num_examples / total_data_size) for _, res in results]
+        tau_eff = np.sum(local_tau)  # 데이터 비율을 고려한 tau_eff 계산
 
         aggregate_parameters = []
 
         for _, res in results:
+        for _, res in results:
             params = parameters_to_ndarrays(res.parameters)
+            client_data_size = res.num_examples  # 각 클라이언트의 데이터 크기
+
+            # 데이터 비율 계산 (전체 데이터 대비 클라이언트 데이터 비율)
+            data_ratio = client_data_size / total_data_size
+            
+            # tau_eff와 데이터 비율을 기반으로 가중치 조정
+            scale = tau_eff * res.metrics["tau"] * data_ratio  # 데이터 비율을 적용한 스케일링
             client_data_size = res.num_examples  # 각 클라이언트의 데이터 크기
 
             # 데이터 비율 계산 (전체 데이터 대비 클라이언트 데이터 비율)
@@ -351,8 +367,10 @@ class FedNova(FedAvg):
             aggregate_parameters.append((params, scale))
 
         # 클라이언트의 파라미터를 가중치 평균으로 합산
+        # 클라이언트의 파라미터를 가중치 평균으로 합산
         agg_cum_gradient = aggregate(aggregate_parameters)
 
+        # 서버 파라미터 업데이트
         # 서버 파라미터 업데이트
         self.update_server_params(agg_cum_gradient)
         if (self.global_parameters is not None) and (server_round % 5 == 0):
@@ -379,11 +397,13 @@ class FedNova(FedAvg):
                     self.global_momentum_buffer[i] += layer_cum_grad / self.lr
 
                 self.global_parameters[i] = self.global_parameters[i].astype(np.float64)
+                self.global_parameters[i] = self.global_parameters[i].astype(np.float64)
                 self.global_parameters[i] -= self.global_momentum_buffer[i] * self.lr
 
             else:
                 # weight updated eqn: x_new = x_old - gradient
                 # the layer_cum_grad already has all the learning rate multiple
+                self.global_parameters[i] = self.global_parameters[i].astype(np.float64)
                 self.global_parameters[i] = self.global_parameters[i].astype(np.float64)
                 self.global_parameters[i] -= layer_cum_grad
 

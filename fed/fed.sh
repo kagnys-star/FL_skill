@@ -16,13 +16,14 @@ sleep 3
 
 
 # start clients
-for i in `seq 0 3`; do
+for i in `seq 0 1`; do
     echo "Starting client $i"
     CUDA_VISIBLE_DEVICES=0 python3 client.py --path=/home/kangys/workspace/FL_skill/spirl/configs/skill_prior_learning/half_cheetah/feddyn \
         --prefix=cheetah-feddyn-hetero2_client_${i}-0\
         --data_dir=${DATA_DIR}/FL_${i} &
     sleep 10
 done
+#END
 #END
 
 # enable CTRL+C to stop all background processes

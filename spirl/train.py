@@ -63,6 +63,8 @@ class ModelTrainer(BaseTrainer):
                                 n_repeat=self._hp.epoch_cycles_train,
                                 dataset_size=-1)
         self.logger, self.model, self.train_loader = self.build_phase(train_params, 'train')
+        print(self.model._hp.kl_div_weight)
+        exit()
 
         test_params = AttrDict(logger_class=self._hp.logger if self._hp.logger_test is None else self._hp.logger_test,
                                model_class=self._hp.model if self._hp.model_test is None else self._hp.model_test,
@@ -104,7 +106,7 @@ class ModelTrainer(BaseTrainer):
             'optimizer': 'radam',    # supported: 'adam', 'radam', 'rmsprop', 'sgd'
             'lr': 1e-3,
             'gradient_clip': None,
-            'init_grad_clip': 0.001,
+            'init_grad_clip': 0.01,
             'init_grad_clip_step': 100,     # clip gradients in initial N steps to avoid NaNs
             'momentum': 0,      # momentum in RMSProp / SGD optimizer
             'adam_beta': 0.9,       # beta1 param in Adam

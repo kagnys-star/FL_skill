@@ -9,5 +9,6 @@ CUDA_VISIBLE_DEVICES=0 mpirun -np 9 python3 spirl/rl/trains.py --path=spirl/conf
 #CUDA_VISIBLE_DEVICES=0 python3 spirl/rl/train.py --path=spirl/configs/hrl/metaworld/MT_10 --seed=0 --prefix=meta_10
 #CUDA_VISIBLE_DEVICES=0 python3 spirl/hydra_fl.py
 #CUDA_VISIBLE_DEVICES=0 python3 spirl/FL_SPIRL_client2.py
+#CUDA_VISIBLE_DEVICES=0 python3 spirl/FL_SPIRL_client2.py
 #CUDA_VISIBLE_DEVICES=0 python3 spirl/train.py --path=spirl/configs/skill_prior_learning/metaworld
 #CUDA_VISIBLE_DEVICES=0 python3 spirl/train.py --path=spirl/configs/skill_prior_learning/mt1/hierarchical_cl --prefix=mixing_data_test-4

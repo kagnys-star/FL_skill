@@ -5,7 +5,9 @@ import torch
 
 from spirl.utils.general_utils import flatten_dict, prefix_dict
 from spirl.utils.vis_utils import plot_graph
+import warnings
 
+warnings.filterwarnings("ignore")
 
 class WandBLogger:
     """Logs to WandB."""

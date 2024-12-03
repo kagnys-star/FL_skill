@@ -5,9 +5,11 @@ from contextlib import contextmanager
 import torch
 import torch.nn as nn
 from collections import defaultdict
+from collections import defaultdict
 from torch.utils.data import DataLoader
 from torch.utils.data import Sampler
 from torch.nn.parallel._functions import Gather
+from torch.optim.optimizer import Optimizer , required
 from torch.optim.optimizer import Optimizer , required
 from torch.nn.modules import BatchNorm1d, BatchNorm2d, BatchNorm3d
 from torch.nn.functional import interpolate
