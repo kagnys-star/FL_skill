@@ -17,6 +17,7 @@ from spirl.rl.components.replay_buffer import RolloutStorage, SuccessRateRollout
 import imageio
 import random
 import string
+import code
 import numpy as np
 
 
@@ -38,8 +39,7 @@ class RLTrainer:
         self._hp.exp_path = make_path(self.conf.exp_dir, args.path, args.prefix, args.new_dir)
         self.log_dir = log_dir = os.path.join(self._hp.exp_path, 'log')
         print('using log dir: ', log_dir)
-        pretty_print(self.conf)
-        exit()
+
         # set seeds, display, worker shutdown
         if args.seed != -1: self._hp.seed = args.seed   # override from command line if set
         set_seeds(self._hp.seed)
@@ -60,8 +60,8 @@ class RLTrainer:
         if 'general' in self.conf: self.conf.general.seed=self._hp.seed
         self.env = self._hp.environment(self.conf.env)
         self.conf.agent.env_params = self.env.agent_params      # (optional) set params from env for agent
-        #if self.is_chef:
-        #    pretty_print(self.conf)
+        if self.is_chef:
+            pretty_print(self.conf)
 
         # build agent (that holds actor, critic, exposes update method)
         self.conf.agent.num_workers = self.conf.mpi.num_workers
@@ -77,7 +77,6 @@ class RLTrainer:
             print(self.conf.ckpt_path)
             start_epoch = self.resume(args.resume, self.conf.ckpt_path)
             self._hp.n_warmup_steps = 0     # no warmup if we reload from checkpoint!
-
         # start training/evaluation
         if args.mode == 'train':
             self.train(start_epoch)
@@ -114,14 +113,14 @@ class RLTrainer:
             print("Epoch {}".format(epoch))
             self.train_epoch(epoch)
 
-            if not self.args.dont_save and self.is_chef:
+            if not self.args.dont_save and self.is_chef and (epoch == (self._hp.num_epochs -1)):
                 save_checkpoint({
                     'epoch': epoch,
                     'global_step': self.global_step,
                     'state_dict': self.agent.state_dict(),
                 }, os.path.join(self._hp.exp_path, 'weights'), CheckpointHandler.get_ckpt_name(epoch))
                 self.agent.save_state(self._hp.exp_path)
-                self.val()
+            self.val()
 
     def train_epoch(self, epoch):
         """Run inner training loop."""
@@ -161,22 +160,24 @@ class RLTrainer:
 
     def val(self):
         """Evaluate agent."""
-        val_rollout_storage = RolloutStorage()
+        val_rollout_storage = SuccessRateRolloutStorage()
         #val_rollout_storage= accuracy_RolloutStorage()
         with self.agent.val_mode():
             with torch.no_grad():
                 with timing("Eval rollout time: "):
                     for _ in range(WandBLogger.N_LOGGED_SAMPLES):   # for efficiency instead of self.args.n_val_samples
                         val_rollout_storage.append(self.sampler.sample_episode(is_train=False, render=False))
-                        
-        rollout_stats = val_rollout_storage.rollout_stats()
-        #save_frames_as_video(val_rollout_storage)
 
-        if self.is_chef:
-            with timing("Eval log time: "):
-                self.agent.log_outputs(rollout_stats, val_rollout_storage,
-                                       self.logger, log_images=False, step=self.global_step)
-            print("Evaluation Avg_Reward: {}".format(rollout_stats.avg_reward))
+            rollout_stats = val_rollout_storage.rollout_stats()
+            #save_frames_as_video(val_rollout_storage)
+
+            if self.is_chef:
+                with timing("Eval log time: "):
+                    self.agent._is_train = False
+                    self.agent.log_outputs(rollout_stats, val_rollout_storage,
+                                            self.logger, log_images=False, step=self.global_step)
+                    self.agent._is_train = True
+                print("Evaluation Avg_Reward: {}".format(rollout_stats.avg_reward))
 
         del val_rollout_storage
 

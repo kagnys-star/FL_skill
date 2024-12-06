@@ -23,6 +23,8 @@ def get_args():
                         help='if True, will skip the first validation epoch')
     parser.add_argument('--val_sweep', default=False, type=int,
                         help='if True, runs validation on all existing model checkpoints')
+    parser.add_argument('--exp_mode', default=None, type=str,
+                        help='use federated learning which clients and server')
 
     # Misc
     parser.add_argument('--gpu', default=-1, type=int,

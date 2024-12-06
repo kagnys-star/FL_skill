@@ -75,12 +75,13 @@ class AttrDict(dict):
 
     def __setstate__(self, d):
         self = d
-        
+
     def __delattr__(self, attr):
         try:
             del self[attr]  # Delete the key from the dict
         except KeyError:
             raise AttributeError(f"Attribute {attr!r} not found")
+
 
 class PriorityQueue:
     def __init__(self):

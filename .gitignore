@@ -5,14 +5,10 @@ __pycache__
 experiments/
 outputs/
 spirl/wandb/
-Metaworld
-eval_1.sh
+metaworld
+metaworld_complex
 eval_2.sh
 eval_3.sh
-eval_4.sh
-eval_5.sh
-eval_6.sh
-just_eval.sh
 test_prior_skill.ipynb
 script
 spirl/Custome_train.py

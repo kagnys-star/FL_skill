@@ -1,7 +1,6 @@
 import torch
 import os
 import numpy as np
-
 from spirl.rl.components.agent import BaseAgent
 from spirl.utils.general_utils import ParamDict, map_dict, AttrDict
 from spirl.utils.pytorch_utils import ten2ar, avg_grad_norm, TensorModule, check_shape, map2torch, map2np
@@ -28,6 +27,7 @@ class ACAgent(BaseAgent):
     def _act(self, obs):
         # TODO implement non-sampling validation mode
         obs = map2torch(self._obs_normalizer(obs), self._hp.device)
+
         if len(obs.shape) == 1:     # we need batched inputs for policy
             policy_output = self._remove_batch(self.policy(obs[None]))
             if 'dist' in policy_output:

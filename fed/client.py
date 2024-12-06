@@ -1,7 +1,27 @@
+import matplotlib; matplotlib.use('Agg')
+from shutil import copy
 from spirl.components.params import get_args
+from client_model import *
 import flwr as fl
-from cl_model import *
+
+WANDB_PROJECT_NAME = 'fl-skill'
+WANDB_ENTITY_NAME = 'yskang'
 
 if __name__ == '__main__':
-    client = FS_Clients(args=get_args()).to_client()
+    args=get_args()
+    exp_mode = args.exp_mode
+    if exp_mode == 'fedavg':
+        client = BaseClients(args = args).to_client()
+    elif exp_mode == 'fedasam':
+        client = ASAMClients(args = args).to_client()
+    elif exp_mode == 'fedprox':
+        client = FP_Clients(args = args).to_client()
+    elif exp_mode == 'fednova':
+        client = FN_Clients(args = args).to_client()
+    elif exp_mode == 'fedsol':
+        client = FS_Clients(args = args).to_client()
+    elif exp_mode == 'feddyn':
+        client = FD_Clients(args = args).to_client()
+    else:
+        raise ValueError("federated learning '{}' not supported!".format(exp_mode))
     fl.client.start_client(server_address="127.0.0.1:8080", client=client)

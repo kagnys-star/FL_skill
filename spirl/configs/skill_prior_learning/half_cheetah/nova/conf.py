@@ -17,7 +17,8 @@ configuration = {
     'evaluator': SequenceEvaluator,
     'top_of_n_eval': 1,
     'top_comp_metric': 'mse',
-    'optimizer' : 'sgd',
+    'optimizer' : 'radam',
+    'batch_size': 16,
 }
 configuration = AttrDict(configuration)
 
@@ -26,10 +27,12 @@ model_config = AttrDict(
     action_dim=data_spec.n_actions,
     n_rollout_steps=10,
     kl_div_weight=5e-4,
+    #target_kl= 5e-4,
     nz_enc=128,
     nz_mid=128,
     n_processing_layers=5,
     cond_decode=True,
+
 )
 
 # Dataset

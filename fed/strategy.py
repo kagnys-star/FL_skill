@@ -22,6 +22,7 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
 )
+import pickle
 
 
 class SM_FedYogi(FedYogi):
@@ -301,8 +302,10 @@ class FEDASAM_opt(FedAvg):
 
 class FedNova(FedAvg):
     """FedNova."""
-    def __init__(self, lr , gmf , *args, **kwargs):
+    def __init__(self, save_dir, lr , gmf , *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.save_dir = save_dir
+        os.makedirs(self.save_dir, exist_ok=True)
         self.lr = lr
         # Maintain a momentum buffer for the weight updates across rounds of training
         self.global_momentum_buffer: List[NDArray] = []
@@ -312,6 +315,7 @@ class FedNova(FedAvg):
             )
         # momentum parameter for the server/strategy side momentum buffer
         self.gmf = gmf
+
 
 
     def aggregate_fit(
@@ -334,11 +338,25 @@ class FedNova(FedAvg):
         # tau_eff 계산: 각 클라이언트의 tau 값에 데이터 비율을 곱한 후 합산
         local_tau = [res.metrics["tau"] * (res.num_examples / total_data_size) for _, res in results]
         tau_eff = np.sum(local_tau)  # 데이터 비율을 고려한 tau_eff 계산
+        # 전체 클라이언트의 데이터 크기를 합산
+        total_data_size = np.sum([fit_res.num_examples for _, fit_res in results])
+
+        # tau_eff 계산: 각 클라이언트의 tau 값에 데이터 비율을 곱한 후 합산
+        local_tau = [res.metrics["tau"] * (res.num_examples / total_data_size) for _, res in results]
+        tau_eff = np.sum(local_tau)  # 데이터 비율을 고려한 tau_eff 계산
 
         aggregate_parameters = []
 
         for _, res in results:
+        for _, res in results:
             params = parameters_to_ndarrays(res.parameters)
+            client_data_size = res.num_examples  # 각 클라이언트의 데이터 크기
+
+            # 데이터 비율 계산 (전체 데이터 대비 클라이언트 데이터 비율)
+            data_ratio = client_data_size / total_data_size
+            
+            # tau_eff와 데이터 비율을 기반으로 가중치 조정
+            scale = tau_eff * res.metrics["tau"] * data_ratio  # 데이터 비율을 적용한 스케일링
             client_data_size = res.num_examples  # 각 클라이언트의 데이터 크기
 
             # 데이터 비율 계산 (전체 데이터 대비 클라이언트 데이터 비율)
@@ -349,14 +367,16 @@ class FedNova(FedAvg):
             aggregate_parameters.append((params, scale))
 
         # 클라이언트의 파라미터를 가중치 평균으로 합산
+        # 클라이언트의 파라미터를 가중치 평균으로 합산
         agg_cum_gradient = aggregate(aggregate_parameters)
 
+        # 서버 파라미터 업데이트
         # 서버 파라미터 업데이트
         self.update_server_params(agg_cum_gradient)
         if (self.global_parameters is not None) and (server_round % 5 == 0):
             # Save aggregated_ndarrays
             np.savez(os.path.join(self.save_dir,f"round-{server_round}-weights.npz"), *self.global_parameters)
-            
+
         return ndarrays_to_parameters(self.global_parameters), {}
 
     def update_server_params(self, cum_grad: NDArrays):
@@ -377,11 +397,13 @@ class FedNova(FedAvg):
                     self.global_momentum_buffer[i] += layer_cum_grad / self.lr
 
                 self.global_parameters[i] = self.global_parameters[i].astype(np.float64)
+                self.global_parameters[i] = self.global_parameters[i].astype(np.float64)
                 self.global_parameters[i] -= self.global_momentum_buffer[i] * self.lr
 
             else:
                 # weight updated eqn: x_new = x_old - gradient
                 # the layer_cum_grad already has all the learning rate multiple
+                self.global_parameters[i] = self.global_parameters[i].astype(np.float64)
                 self.global_parameters[i] = self.global_parameters[i].astype(np.float64)
                 self.global_parameters[i] -= layer_cum_grad
 
@@ -393,18 +415,21 @@ class Scaffold(FedAvg):
         self.save_dir = save_dir
         os.makedirs(self.save_dir, exist_ok=True)
         #Scaffold specific variables
-        self.weight_shapes = list(map(lambda arr: arr.shape, parameters_to_ndarrays(self.initial_parameters)))
+        self.global_weighs = parameters_to_ndarrays(self.initial_parameters)
+        self.weight_shapes = list(map(lambda arr: arr.shape, self.global_weighs))
         self.covariates = [np.zeros(shape) for shape in self.weight_shapes]
         #store client_covariates on server side because clients are generated on demand. Instead of each client holding its state
         # as the Scaffold paper describes, we store the client_covariates on server side. This of course can be changed.
         self.clients_covariates: Dict[str, NDArrays] = {} # cid -> client_covariates
         self.covariates_zero = [np.zeros(shape) for shape in self.weight_shapes] # initial client covariates
 
+
+
     def initialize_parameters(
         self, client_manager
     ) -> Optional[Parameters]:
         """Initialize global model parameters."""
-        return self._pack_weights_and_covariates(parameters_to_ndarrays(self.initial_parameters), self.covariates)
+        return self._pack_weights_and_covariates(self.global_weighs, self.covariates)
 
     def _unpack_parameters(self, parameters: Parameters) -> Tuple[NDArrays, NDArrays]:
         """Extract weights and covariates from parameters"""
@@ -454,20 +479,24 @@ class Scaffold(FedAvg):
         weights_aggregated = aggregate(weights_results)
         # equation (5)(ii) - Scaffold paper
         # similar trick as previously - no need to use previous server covariates
+
+        client_covar = []
         client_covar = list(np.sum(list(self.clients_covariates.values()), axis=0) / len(self.clients_covariates))
         new_server_covariates = [
             x + y for x, y in zip(self.covariates, client_covar)
         ]
-        
         parameters_aggregated = self._pack_weights_and_covariates(weights_aggregated, new_server_covariates)
+        #with open(f"server_control_variate-{server_round}.pickle",'wb') as fw:
+        #    pickle.dump(server_covariates, fw)
+        self.global_weighs = weights_aggregated
         self.covariates = new_server_covariates
-
         if (weights_aggregated is not None) and (server_round % 5 == 0):
             # Convert `Parameters` to `List[np.ndarray]`
             # Save aggregated_ndarrays
             np.savez(os.path.join(self.save_dir,f"round-{server_round}-weights.npz"), *weights_aggregated)
 
         return parameters_aggregated, {}
+
 
     def _check_shapes(self, weights_and_covariates: NDArrays) -> None:
         """Given a list of numpy arrays checks whether they have a repeating pattern of given shapes"""
@@ -482,7 +511,7 @@ class FedSOL(SM_FedAVG):
         super().__init__(*args, **kwargs)
 
 
-class Feddyn(SM_FedAVG):
+class FedDyn(SM_FedAVG):
     def __init__(self, dyn_alpha, n_clients, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.dyn_alpha = dyn_alpha
@@ -498,6 +527,8 @@ class Feddyn(SM_FedAVG):
     ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
         """Aggregate fit results using weighted average."""
 
+        aggregated_parameters, aggregated_metrics = super().aggregate_fit(server_round, results, failures)
+        '''
         if not results:
             return None, {}
 
@@ -506,23 +537,27 @@ class Feddyn(SM_FedAVG):
             return None, {}
         
         # Step 1: Update h_t using client updates
-        total_size = 0
+        aggregate_parameters = []
+        total_data_size = np.sum([fit_res.num_examples for _, fit_res in results])
         for _, fit_res in results:
-            total_size += fit_res.num_examples
-            for i , layers in enumerate(parameters_to_ndarrays(fit_res.parameters)):
+            params = parameters_to_ndarrays(fit_res.parameters)
+            data_ratio = fit_res.num_examples / total_data_size
+            aggregate_parameters.append((params, data_ratio))
+            for i , layers in enumerate(params):
                 self.h_t[i] -= (self.dyn_alpha / self.n_clients) * (layers - self.global_parameters[i])
         
+        agg_cum_gradient = aggregate(aggregate_parameters)
         # Step 2: Use only h_t to update the global weights
-        new_global_weights = copy.deepcopy(self.h_t)
         for _, fit_res in results:
-            for i , layers in enumerate(parameters_to_ndarrays(fit_res.parameters)):
-                new_global_weights[i] = -(1.0/ self.dyn_alpha) * new_global_weights[i]
-                new_global_weights[i] += (fit_res.num_examples / total_size) * (layers)
-        self.global_parameters = new_global_weights
+            for i , layers in enumerate(agg_cum_gradient):
+                self.global_parameters[i] = layers - (1.0/ self.dyn_alpha) * self.h_t[i]
+        
 
-        if (new_global_weights is not None) and (server_round % 5 == 0):
+        if (self.global_parameters is not None) and (server_round % 5 == 0):
             # Convert `Parameters` to `List[np.ndarray]`
+            aggregated_ndarrays: List[np.ndarray] = parameters_to_ndarrays(aggregated_parameters)
             # Save aggregated_ndarrays
-            np.savez(os.path.join(self.save_dir,f"round-{server_round}-weights.npz"), *new_global_weights)
-
-        return ndarrays_to_parameters(self.global_parameters) , {}
+            np.savez(os.path.join(self.save_dir,f"round-{server_round}-weights.npz"), *aggregated_ndarrays)
+        '''
+        
+        return aggregated_parameters, aggregated_metrics
