@@ -1,14 +1,14 @@
 export EXP_DIR=/home/kangys/workspace/FL_skill/experiments
-export DATA_DIR=/home/kangys/workspace/FL_skill/data/6_mix_task/3
+export DATA_DIR=/home/kangys/workspace/FL_skill/data/6_mix_task/4
 
 #!/bin/bash
 set -e
 
 # start server, wait before launching clients
-CUDA_VISIBLE_DEVICES=0 python server.py --path=/home/kangys/workspace/FL_skill/spirl/configs/skill_prior_learning/drawer_open/fedavg \
+CUDA_VISIBLE_DEVICES=0 python server.py --path=/home/kangys/workspace/FL_skill/spirl/configs/skill_prior_learning/drawer_open/feddyn \
                                         --data_dir=${DATA_DIR} \
-                                        --exp_mode=fedavg \
-                                        --prefix=6_mix_task-fedavg-iid_server-2 &
+                                        --exp_mode=feddyn \
+                                        --prefix=6_mix_task-feddyn-one_server-3 &
 #: <<'END'
 sleep 3
 
@@ -16,13 +16,14 @@ sleep 3
 # start clients
 for i in `seq 0 3`; do
     echo "Starting client $i"
-    CUDA_VISIBLE_DEVICES=0 python3 client.py --path=/home/kangys/workspace/FL_skill/spirl/configs/skill_prior_learning/drawer_open/fedavg \
-        --prefix=6_mix_task-fedavg-iid_client_${i}-2 \
-        --exp_mode=fedavg \
+    CUDA_VISIBLE_DEVICES=0 python3 client.py --path=/home/kangys/workspace/FL_skill/spirl/configs/skill_prior_learning/drawer_open/feddyn \
+        --prefix=6_mix_task-feddyn-one_client_${i}-3 \
+        --exp_mode=feddyn \
         --data_dir=${DATA_DIR}/FL_${i} &
     sleep 10
 done
 #END
+
 
 # enable CTRL+C to stop all background processes
 trap "trap - SIGTERM && kill -- -$$" SIGINT SIGTERM

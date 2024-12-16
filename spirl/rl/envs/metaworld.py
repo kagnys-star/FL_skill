@@ -95,6 +95,10 @@ class FIXEDMT10(GymEnv):
         return info
 
 class MIX_TASK(FIXEDMT10):
+    def __init__(self, config):
+        self._hp = self._default_hparams().overwrite(config)
+        self.task_id = self._hp.task_id
+        self._env = self._make_env(seed = self._hp.seed)
 
     def _make_env(self, seed):
         from gym import wrappers
@@ -102,8 +106,14 @@ class MIX_TASK(FIXEDMT10):
             taks = "reach-v2"
         elif self.task_id < 8:
             taks = "drawer-open-v2"
-        else:
+        elif self.task_id < 12:
             taks = "door-open-v2"
+        elif self.task_id < 16:
+            taks = "push-v2"
+        elif self.task_id < 20:
+            taks = "button-press-v2"
+        elif self.task_id < 24:
+            taks = "drawer-close-v2"
         ml1 = metaworld.ML1(taks)
         env = ml1.train_classes[taks]()
         task = random.choice(ml1.train_tasks)
@@ -111,16 +121,19 @@ class MIX_TASK(FIXEDMT10):
         env._partially_observable = False
         env.random_init = False
         if self.task_id < 4:
+            #reach
             initial_hand_positions , goal_positions = goal_hand_generation()
             env.hand_init_pos = initial_hand_positions[self.task_id]
             env._last_rand_vec = np.concatenate((env.init_config["obj_init_pos"],goal_positions[self.task_id]))
             env.goal = goal_positions[self.task_id]
         elif self.task_id < 8:
-            idx = self.task_id - 4
+            #drawer open
+            idx = self.task_id % 4
             env.init_config['obj_init_pos'] = RAND_VEC[idx]
             env._last_rand_vec = np.concatenate((env.init_config["obj_init_pos"], env.init_config["obj_init_pos"] + np.array([.0, -.16 - env.maxDist, .09])))
-        else:
-            idx = self.task_id - 8
+        elif self.task_id < 12:
+            # door open
+            idx = self.task_id % 4
             low_bound = env._random_reset_space.low
             high_bound = env._random_reset_space.high
             obj = same_position_generations(low_bound[:3],high_bound[:3],4)
@@ -128,7 +141,38 @@ class MIX_TASK(FIXEDMT10):
             env._last_rand_vec = np.concatenate((obj[idx],goal[idx]))
             env.init_config['obj_init_pos'] = obj[idx]
             env.goal = goal[idx]
+        elif self.task_id < 16:
+            #push
+            idx = self.task_id % 4
+            low_bound = env._random_reset_space.low
+            high_bound = env._random_reset_space.high
+            obj = same_position_generations(low_bound[:3],high_bound[:3],4)
+            goal = same_position_generations(low_bound[3:],high_bound[3:],4)
+            env._last_rand_vec = np.concatenate((obj[idx],goal[idx]))
+            env.init_config['obj_init_pos'] = obj[idx]
+            env.goal = goal[idx]
+        elif self.task_id < 20:
+            #butten press
+            idx = self.task_id % 4
+            low_bound = env._random_reset_space.low
+            high_bound = env._random_reset_space.high
+            obj = same_position_generations(low_bound[:3],high_bound[:3],4)
+            goal = env._get_site_pos('hole')
+            env._last_rand_vec = np.concatenate((obj[idx],goal))
+            env.init_config['obj_init_pos'] = obj[idx]
+            env.goal = goal
+        else:
+            # drawer close
+            idx = self.task_id % 4
+            low_bound = env._random_reset_space.low
+            high_bound = env._random_reset_space.high
+            obj = same_position_generations(low_bound[:3],high_bound[:3],4)
+            goal = np.array([ x + np.array([.0, -.16, .09]) for x in obj])
+            env._last_rand_vec = np.concatenate((obj[idx],goal[idx]))
+            env.init_config['obj_init_pos'] = obj[idx]
+            env.goal = goal[idx]
         env._freeze_rand_vec = True
         env.seed(seed)
         env.reset()
         return env
+    

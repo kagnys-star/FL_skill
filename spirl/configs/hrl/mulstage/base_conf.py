@@ -5,14 +5,13 @@ from spirl.utils.general_utils import AttrDict
 from spirl.rl.components.agent import FixedIntervalHierarchicalAgent
 from spirl.rl.policies.mlp_policies import MLPPolicy
 from spirl.rl.components.critic import MLPCritic
-#from spirl.rl.envs.mt10 import MT10
-from spirl.rl.envs.metaworld import MIX_TASK
+from spirl.rl.envs.mulstage import mulstage , Lmulstage
 from spirl.rl.components.sampler import HierarchicalSampler
 from spirl.rl.components.replay_buffer import UniformReplayBuffer
 from spirl.rl.agents.ac_agent import SACAgent
 from spirl.rl.agents.skill_space_agent import SkillSpaceAgent
 from spirl.models.skill_prior_mdl import SkillPriorMdl
-from spirl.configs.default_data_configs.metaworld import data_spec
+from spirl.configs.default_data_configs.mulstage import data_spec
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -20,13 +19,13 @@ notes = 'hierarchical RL on the kitchen env'
 
 
 configuration = {
-    'seed': 42,
+    'seed': 20241210,
     'agent': FixedIntervalHierarchicalAgent,
-    'environment': MIX_TASK,
+    'environment': mulstage,
     'sampler': HierarchicalSampler,
     'data_dir': '.',
-    'num_epochs': 3,
-    'max_rollout_len': 500,
+    'num_epochs': 20,
+    'max_rollout_len': 1600,
     'n_steps_per_epoch': 10000,
     'n_warmup_steps': 5e3,
     }
@@ -46,6 +45,8 @@ base_agent_params = AttrDict(
     replay=UniformReplayBuffer,
     replay_params=replay_params,
     clip_q_target=False,
+
+
 )
 
 
@@ -97,8 +98,10 @@ hl_agent_config = copy.deepcopy(base_agent_params)
 hl_agent_config.update(AttrDict(
     policy=MLPPolicy,
     policy_params=hl_policy_params,
+    #policy_lr=1e-3,
     critic=MLPCritic,
     critic_params=hl_critic_params,
+    #critic_lr=1e-3,
 ))
 
 
@@ -116,8 +119,8 @@ agent_config = AttrDict(
 data_config = AttrDict()
 data_config.dataset_spec = data_spec
 
-#TASKS = ['reach-v2','door-open-v2','drawer-open-v2','button-press-v2']
 
+#['box', 'drawer', 'button', 'door']
 env_config = AttrDict(
-    task_id = 4,
+    task_id=0,
 )

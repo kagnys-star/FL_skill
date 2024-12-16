@@ -86,7 +86,7 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
             'reconstruction_mse_weight': 1.,    # weight of MSE reconstruction loss
             'kl_div_weight': 1.,                # weight of KL divergence loss
             'target_kl': None,                  # if not None, adds automatic beta-tuning to reach target KL divergence
-            'q_hat_weight' : 1e-2,
+            'q_hat_weight' : 1e-3,
         })
 
         # loading pre-trained components

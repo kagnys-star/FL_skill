@@ -1,12 +1,10 @@
 from collections import OrderedDict
 from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
-from spirl.configs.default_data_configs.metaworld import data_spec
 from spirl.rl.components.replay_buffer import UniformReplayBuffer
 from spirl.components.evaluator import TopOfNSequenceEvaluator
 from spirl.rl.policies.cl_model_policies import ClModelPolicy
 from spirl.rl.components.critic import MLPCritic
 from spirl.rl.agents.ac_agent import SACAgent
-from spirl.rl.envs.mt10 import MT10
 from spirl.modules.variational_inference import MultivariateGaussian
 from spirl.utils.pytorch_utils import no_batchnorm_update
 import os
@@ -252,7 +250,8 @@ def prior_sequence_action(obs,model):
     return action[0]
 
 if __name__ == "__main__":
-
+    from spirl.configs.default_data_configs.mulstage import data_spec
+    from spirl.rl.envs.mulstage import mulstage
     ## SPIRL MODEL CONFIGS
     model_config =AttrDict(
         state_dim=data_spec.state_dim,
@@ -272,10 +271,10 @@ if __name__ == "__main__":
     data_config.dataset_spec.subseq_len = 11
     data_config.batch_size = 512
     data_config.device = torch.device("cuda" if torch.cuda.is_available() else "cpu").type
-    data_config.data_dir = "/home/kangys/workspace/FL_skill/data/data7"
+    data_config.data_dir = "/home/kangys/workspace/FL_skill/data/mulstage/0"
     data_config.prefix = "task_id-iid"
 
-    init_path="/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mt6/fedavg/hetero5/weights/round-300-weights.npz"
+    init_path="/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mulstage/fedsol/hetero/weights/round-300-weights.npz"
     basemodel =  gl_numpy_model_load(config=model_config, init_path=init_path)
     basemodel.to(torch.device("cuda"))
     #['reach-v2','door-open-v2','drawer-open-v2','button-press-v2']
@@ -285,7 +284,7 @@ if __name__ == "__main__":
     )
     log_sigma = torch.tensor(-50 * np.ones(data_spec.n_actions, dtype=np.float32),
                                        device=torch.device("cuda"), requires_grad=True)
-    env = MT10(env_config)
+    env = mulstage(env_config)
     with env.val_mode():
         basemodel.eval()
         with autograd.no_grad():
@@ -294,13 +293,12 @@ if __name__ == "__main__":
                 done = False
                 obs = env.reset()
                 count = 0
-                while count < 500 and not done:
+                while count < 800 and not done:
                     count += 1
                     a = prior_sequence_action(obs, basemodel)
                     obs, reward, done, info = env.step(a)
-                    if int(env.sucess_info) == 1:
-                        success += 1
-                        break
+                success += sum(info['is_success'])
+                
         
     print(success/10)
     '''

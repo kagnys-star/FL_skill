@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
-from spirl.configs.default_data_configs.metaworld import data_spec
+
 from spirl.components.evaluator import TopOfNSequenceEvaluator
 import os
 import datetime
@@ -235,6 +235,7 @@ def save_checkpoint(basemodel,folder):
     '''
 
 if __name__ == "__main__":
+    from spirl.configs.default_data_configs.half_cheetah import data_spec
     model_config =AttrDict(
         state_dim=data_spec.state_dim,
         action_dim=data_spec.n_actions,
@@ -280,14 +281,14 @@ if __name__ == "__main__":
                 save_path = f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mt4/{folder_name}/repeat/{save_num}/weights"
                 save_checkpoint(basemodel,folder=save_path)
     '''
-    exp_mode = ["fedasam" ,"fednova" ,"fedsol", "feddyn"]
-    data_type = ["hetero4"]
+    exp_mode = ["fedmmd"] 
+    data_type = ["hetero2"]
     for exp in exp_mode:
         for d_type in data_type:
             folder_name = exp + "/" + d_type
             save_num = 300
-            basemodel =  gl_numpy_model_load_change(config=model_config, init_path=f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mt6/{folder_name}/weights/round-{save_num}-weights.npz")
-            save_path = f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mt6/{folder_name}/repeat/{save_num}/weights"
+            basemodel =  gl_numpy_model_load_change(config=model_config, init_path=f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/ashtah/{folder_name}/weights/round-{save_num}-weights.npz")
+            save_path = f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/ashtah/{folder_name}/repeat/{save_num}/weights"
             save_checkpoint(basemodel,folder=save_path)
     '''
     dataset_class = basemodel.conf.data.dataset_spec.dataset_class

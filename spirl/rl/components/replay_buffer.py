@@ -195,8 +195,9 @@ class SuccessRateRolloutStorage(RolloutStorage):
         results = super().rollout_stats()
         success = 0
         for rollout in self.rollouts:
-            if rollout.info[-1][0]['success'] == 1 :
-                success += 1
+            #
+            #if rollout.info[-1][0]['is_success']:
+            success += sum(rollout.info[-1][0]['is_success'])
         results.success = success / len(self.rollouts)
         return results
 

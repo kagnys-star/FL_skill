@@ -80,8 +80,10 @@ class BaseClients(BaseTrainer,fl.client.NumPyClient):
         self.global_epoch = 0
 
         #save_z and log_q_zx
-        self.z_samples  = []
+        #save_z and log_q_zx
+        self.log_q_z_samples  = []
         self.log_q_zx_samples = []
+        self.mu_samples = []
 
 
     def _default_hparams(self):
@@ -100,7 +102,7 @@ class BaseClients(BaseTrainer,fl.client.NumPyClient):
             'minimizer ' : None,
             'lr': 1e-3,
             'gradient_clip': None,
-            'init_grad_clip': 0.001,
+            'init_grad_clip': 0.5,
             'init_grad_clip_step': 500,     # clip gradients in initial N steps to avoid NaNs
             'momentum': 0,      # momentum in RMSProp / SGD optimizer
             'rho' : 0.1, # SAM/ ASAM optimizer
@@ -321,7 +323,8 @@ class BaseClients(BaseTrainer,fl.client.NumPyClient):
     
     def aux_info(self,outputs):
         self.log_q_zx_samples.append(ten2ar(outputs.q.log_prob(outputs.z)))
-        self.z_samples.append(ten2ar(outputs.z))
+        self.log_q_z_samples.append(ten2ar((-0.5 *(outputs.z ** 2) + math.log(math.sqrt(2*math.pi))).sum(dim=1)))
+        self.mu_samples.append(ten2ar(outputs.q.mu))
 
     def log_outputs(self, output, inputs,epoch,losses,data_load_time,batch_time,upto_log_time,epoch_len):
         self.model.log_outputs(output, inputs, losses, self.global_step,
@@ -347,16 +350,15 @@ class BaseClients(BaseTrainer,fl.client.NumPyClient):
         print('ETA: {:.2f}h'.format(togo_train_time))
 
     def aux_log(self):
-        z_s = np.concatenate(np.array(self.z_samples), axis=0)
         log_q_zx = np.concatenate(np.array(self.log_q_zx_samples), axis=0)
-        z_mean = np.mean(z_s,axis=0)
-        z_var = np.var(z_s,axis=0)
-        log_q_z = -0.5 * np.sum(((z_s - z_mean) ** 2 / z_var + np.log(z_var) + np.log(2 * np.pi)),axis=1)
+        log_q_z = np.concatenate(np.array(self.log_q_z_samples), axis=0)
         mi_estimate = (log_q_zx - log_q_z)
+        mu_s = np.concatenate(np.array(self.mu_samples), axis=0)
+        z_var = np.var(mu_s, axis=0, ddof=1)
         threshold = 0.01
-        self.z_samples = []
+        self.log_q_z_samples = []
         self.log_q_zx_samples= []
-
+        self.mu_samples= []
         activated_units = (z_var > threshold).astype(float)
         self.logger.log_scalar(np.mean(activated_units), "AU", self.global_step, "train")
         self.logger.log_scalar(np.mean(mi_estimate), "mi_estimate", self.global_step, "train")
@@ -657,10 +659,10 @@ class FN_Clients(FP_Clients):
     
     def get_gradient_scaling(self):
         grad_scaling_factor = {}
-        etamu = self._hp.lr * self._hp.mu
+        #etamu = self._hp.lr * self._hp.mu
         #coeff = (self.tau - self._hp.momentum * (1 - pow(self._hp.momentum, self.tau)) / (1 - self._hp.momentum)) / (1 - self._hp.momentum)
-        if etamu != 0:
-            coeff *= (1 - etamu)
+        #if etamu != 0:
+        #    coeff *= (1 - etamu)
         grad_scaling_factor['tau'] = self.tau
         return grad_scaling_factor
 
@@ -683,6 +685,7 @@ class SF_Clients(BaseClients):
         for epoch in range(self._hp.num_epochs):
             self.train_epoch(epoch)
             self.global_epoch += 1
+            self.aux_log()
 
 
     def train_epoch(self, epoch):
@@ -820,6 +823,7 @@ class FS_Clients(BaseClients):
         for epoch in range(self._hp.num_epochs):
             self.train_epoch(epoch)
             self.global_epoch += 1
+            self.aux_log()
 
 
     def train_epoch(self, epoch):
@@ -837,12 +841,16 @@ class FS_Clients(BaseClients):
         for self.batch_idx, sample_batched in enumerate(self.train_loader):
             data_load_time.update(time.time() - end)
             inputs = AttrDict(map_dict(lambda x: x.to(self.device), sample_batched))
-
-            proximal = self.add_loss_drift()
-            proximal.total.value.backward()
+            enable_running_stats(self.model)
+            output = self.model(inputs)
+            losses = self.model.loss(output, inputs)
+            losses = self.add_loss_drift(losses)
+            losses.total.value.backward()
+            #proximal = self.add_loss_drift()
+            #proximal.total.value.backward()
             self.minimizer.ascent_step()  # Perform the ascent step
             # Recompute forward pass after the ascent step
-
+            disable_running_stats(self.model)
             output = self.model(inputs)
             losses = self.model.loss(output, inputs)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self._hp.init_grad_clip)
@@ -866,19 +874,20 @@ class FS_Clients(BaseClients):
             self.global_step = self.global_step + 1
 
 
-    def add_loss_drift(self):
-        losses = AttrDict()
+    def add_loss_drift(self, losses):
+        new_losses = AttrDict()
         exception_list = [ "log_sigma", "num_batches_tracked", "running_mean", "running_var" ]
         prox_term = 0.0
         for key ,params in self.model.named_parameters():
             if any(excep in key for excep in exception_list):  # Improved condition check
                 continue
             # Collect tensors in lists
-            params.requires_grad = True 
             prox_term += torch.norm((params - self.global_weights[key])) ** 2
-        losses.proximal = AttrDict(value=prox_term, weight=self._hp.mu/2)
-        losses.total = AttrDict(value=(losses.proximal.value * losses.proximal.weight))
-        return losses
+        if hasattr(losses, 'total'):
+            del losses.total
+        new_losses.proximal = AttrDict(value=prox_term, weight=self._hp.mu/2)
+        new_losses.total = AttrDict(value=(new_losses.proximal.value * new_losses.proximal.weight))
+        return new_losses
 
     def set_parameters(self, parameters):
         super().set_parameters(parameters)
@@ -930,3 +939,68 @@ class FD_Clients(FP_Clients):
     def caculate_grad(self):
         for key, param in self.model.state_dict().items() :
             self.local_grads[key] -= self._hp.mu *(self.global_weights[key].float() - param.float())
+
+
+class Test_Clients(BaseClients):
+    def __init__(self, args):
+        from spirl.models.spt_mdl import MMDEncoder
+        super().__init__(args)
+        spt_config = AttrDict(
+            state_dim=self.conf.model.state_dim,
+            action_dim=self.conf.model.n_actions,
+            n_rollout_steps=self.conf.model.n_rollout_steps,
+            nz_enc=self.conf.model.nz_enc,
+            nz_mid=self.conf.model.nz_mid,
+            n_processing_layers=self.conf.model.n_processing_layers,
+            cond_decode=self.conf.model.cond_decode,
+            device =self.conf.model.device,
+            batch_size = self.conf.model.batch_size,
+            kernel_type = "IMQ"
+        )
+        self.sp_encoder = MMDEncoder(spt_config)
+        self.sp_encoder.load_weights('global',self.model.q.state_dict())
+
+
+
+    def train_epoch(self, epoch):
+        self.model.train()
+        self.model.update_cycle_beta(self.global_epoch)
+        epoch_len = len(self.train_loader)
+        end = time.time()
+        batch_time = AverageMeter()
+        upto_log_time = AverageMeter()
+        data_load_time = AverageMeter()
+        self.log_outputs_interval = self.args.log_interval
+        self.log_images_interval = int(epoch_len / self.args.per_epoch_img_logs)
+        
+        print('starting epoch ', epoch)
+        for self.batch_idx, sample_batched in enumerate(self.train_loader):
+            data_load_time.update(time.time() - end)
+            inputs = AttrDict(map_dict(lambda x: x.to(self.device), sample_batched))
+            self.optimizer.zero_grad()
+            output = self.model(inputs)
+            losses = self.model.loss(output, inputs)
+            losses = self.sp_encoder.calculate(inputs, output,losses)
+            losses.total.value.backward()
+            self.aux_info(output)
+            self.call_hooks(inputs, output, losses, epoch)
+            if self.global_step < self._hp.init_grad_clip_step:
+            # clip gradients in initial steps to avoid NaN gradients
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self._hp.init_grad_clip)
+            self.optimizer.step()
+            self.model.step()
+
+            if self.args.train_loop_pdb:
+                import pdb; pdb.set_trace()
+
+            upto_log_time.update(time.time() - end)
+            batch_time.update(time.time() - end)
+            end = time.time()
+            if self.log_outputs_now:
+                self.log_outputs( output, inputs,epoch,losses,data_load_time,batch_time,upto_log_time,epoch_len)
+            del output, losses
+            self.global_step = self.global_step + 1
+
+    def set_parameters(self, parameters):
+        super().set_parameters(parameters)
+        self.sp_encoder.load_weights('global',self.model.q.state_dict())

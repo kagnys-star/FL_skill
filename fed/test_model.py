@@ -76,9 +76,11 @@ class ServerModel(BaseTrainer):
         print('server Testing')
         start = time.time()
         losses_meter = RecursiveAverageMeter()
-        iw_meter = 0
+        iw_meter = RecursiveAverageMeter()
         z_samples  = []
+        z_q_samples  = []
         log_q_zx_samples = []
+        log_q_z_qx_samples = []
         mu_samples = []
         self.model.eval()
         self.evaluator.reset()
@@ -99,10 +101,12 @@ class ServerModel(BaseTrainer):
                                             steps=self.model._hp.n_rollout_steps,
                                             inputs=inputs)
                 losses.prior_mse = L2Loss(1.0)(inputs.actions,(output.q_reconstruction))
-                iw_meter += self.importants_weights(output, inputs)
+                iw_meter.update(AttrDict(LL = self.importants_weights(output, inputs)))
                 losses_meter.update(losses)
                 log_q_zx_samples.append(ten2ar(output.q.log_prob(output.z)))
+                log_q_z_qx_samples.append(ten2ar(output.q_hat.log_prob(output.z_p)))
                 z_samples.append(ten2ar((-0.5 *(output.z ** 2) + math.log(math.sqrt(2*math.pi))).sum(dim=1)))
+                z_q_samples.append(ten2ar((-0.5 *(output.z_p ** 2) + math.log(math.sqrt(2*math.pi))).sum(dim=1)))
                 mu_samples.append(ten2ar(output.q.mu))
                 del losses
             
@@ -110,10 +114,13 @@ class ServerModel(BaseTrainer):
             if self.evaluator is not None:
                 self.evaluator.dump_results(rounds)
             log_q_z = np.concatenate(np.array(z_samples), axis=0)
+            log_q_z_q = np.concatenate(np.array(z_q_samples), axis=0)
             #q(z|x)
             log_q_zx = np.concatenate(np.array(log_q_zx_samples), axis=0)
+            log_q_z_qx = np.concatenate(np.array(log_q_z_qx_samples), axis=0)
             #p(z)
             mi_estimate = (log_q_zx - log_q_z)
+            mi_estimate2 = (log_q_z_qx - log_q_z_q)
             mu_s = np.concatenate(np.array(mu_samples), axis=0)
             z_var = np.var(mu_s, axis=0, ddof=1)
             threshold = 0.01
@@ -122,7 +129,8 @@ class ServerModel(BaseTrainer):
             #self.logger.log_scalar(np.mean(log_q_z), "log_q_z", rounds, "val")
             #self.logger.log_scalar(np.mean(log_q_zx), "log_q_zx", rounds, "val")
             self.logger.log_scalar(np.mean(mi_estimate), "mi_estimate", rounds, "val")
-            self.logger.log_scalar(iw_meter/(len(self.train_loader)), "LL", rounds, phase='val')
+            self.logger.log_scalar(np.mean(mi_estimate2), "prior_mi_estimate", rounds, "val")
+            self.logger.log_scalar_dict(iw_meter.avg ,'val', rounds )
             self.model.log_outputs(output, inputs, losses_meter.avg, rounds,
                                         log_images=False, phase='val', **self._logging_kwargs)
             print(('\nTest set: Average loss: {:.4f} in {:.2f}s\n'
@@ -220,7 +228,7 @@ class ServerModel(BaseTrainer):
     def get_exp_dir(self):
         return os.environ['EXP_DIR']
 
-    def importants_weights(self, output, inputs, k=5):
+    def importants_weights(self, output, inputs, k=500):
         log_weights = []
         for _ in range(k):
             z_sample = output.p.sample()  # (batch_size, latent_dim)
@@ -230,9 +238,9 @@ class ServerModel(BaseTrainer):
                                             inputs=inputs)
             mse = torch.sum((inputs.actions - x_reconstructed)**2, dim=-1)
             #p(x|z) 수정 완료
-            log_px_given_z = -0.5 * torch.sum(mse, dim=-1)
+            log_px_given_z = -0.5 * torch.sum(mse, dim=-1) # 추가텀 확장
             #p(z) 애는 수정완료
-            log_pz = -0.5 * torch.sum(z_sample**2, dim=-1) - 0.5 * z_sample.size(-1) * torch.log(torch.tensor(2 * np.pi))
+            log_pz = -0.5 * torch.sum(z_sample**2, dim=-1) - 0.5 * z_sample.size(-1) * torch.log(torch.tensor(2 * math.pi))
             #q(z|x)
             log_qz_given_x = -0.5 * torch.sum((z_sample - output.p.mu)**2 / output.p.sigma**2 + torch.log(output.p.sigma**2), dim=-1)
             log_weight = log_px_given_z + log_pz - log_qz_given_x
@@ -336,82 +344,19 @@ if __name__ == "__main__":
     data_dir = args.data_dir[:-1] + "0"
     args.data_dir = data_dir
     init_model = ServerModel(args=args)
-    num_clients = 4
-    num_rounds = 300
-    #model_parameters = np.load("/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mulstage/fedsol/hetero/weights/round-100-weights.npz",allow_pickle=True)
-    model_parameters = [val.cpu().numpy() for _, val in init_model.model.state_dict().items()]
-    save_dir = fun_save_path(args=args, prefix_only=True)
-
-    # Create strategy
-    exp_mode = args.exp_mode
-    if exp_mode == 'fedavg':
-        strategy = SM_FedAVG(
-            save_dir = save_dir,
-            min_fit_clients=num_clients,
-            min_evaluate_clients=num_clients,
-            min_available_clients=num_clients,
-            evaluate_fn=gen_evaluate_fn(init_model),
-            initial_parameters=fl.common.ndarrays_to_parameters(model_parameters),
-        )
-    elif exp_mode == 'fedasam':
-        strategy = FEDASAM(
-            lr = 1e-3,
-            num_rounds = num_rounds,
-            save_dir = save_dir,
-            min_fit_clients=num_clients,
-            min_evaluate_clients=num_clients,
-            min_available_clients=num_clients,
-            evaluate_fn=gen_evaluate_fn(init_model),
-            initial_parameters=fl.common.ndarrays_to_parameters(model_parameters),
-        )
-    elif exp_mode == 'fedprox':
-        strategy = SM_FedProx(
-            proximal_mu = 0.01,
-            save_dir = save_dir,
-            min_fit_clients=num_clients,
-            min_evaluate_clients=num_clients,
-            min_available_clients=num_clients,
-            evaluate_fn=gen_evaluate_fn(init_model),
-            initial_parameters=fl.common.ndarrays_to_parameters(model_parameters),
-        )
-    elif exp_mode == 'fednova':
-        strategy = FedNova(
-            lr= 1e-3,
-            gmf = 0,
-            save_dir = save_dir,
-            min_fit_clients=num_clients,
-            min_evaluate_clients=num_clients,
-            min_available_clients=num_clients,
-            evaluate_fn=gen_evaluate_fn(init_model),
-            initial_parameters=fl.common.ndarrays_to_parameters(model_parameters),
-        )
-    elif exp_mode == 'fedsol':
-        strategy = FedSOL(
-            save_dir = save_dir,
-            min_fit_clients=num_clients,
-            min_evaluate_clients=num_clients,
-            min_available_clients=num_clients,
-            evaluate_fn=gen_evaluate_fn(init_model),
-            initial_parameters=fl.common.ndarrays_to_parameters(model_parameters),
-        )
-    elif exp_mode == 'feddyn':
-        strategy = FedDyn(
-            dyn_alpha = 0.1,
-            n_clients = num_clients,
-            save_dir = save_dir,
-            min_fit_clients=num_clients,
-            min_evaluate_clients=num_clients,
-            min_available_clients=num_clients,
-            evaluate_fn=gen_evaluate_fn(init_model),
-            initial_parameters=fl.common.ndarrays_to_parameters(model_parameters),
-        )
-    else:
-        raise ValueError("federated learning '{}' not supported!".format(exp_mode))
-
-
-    # Start Flower server for four rounds of federated learning
-    fl.server.start_server(
-        server_address="0.0.0.0:8080",
-        config=fl.server.ServerConfig(num_rounds=num_rounds),
-        strategy=strategy,
-    )
+    init_path = "/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mulstage/fedsol/hetero/weights/round-300-weights.npz"
+    np_dict = np.load(init_path,allow_pickle=True)
+    key_value = init_model.model.state_dict().keys()
+    params_dict = zip(key_value,np_dict)
+    state_dict = OrderedDict()
+    for k, v in params_dict:
+        state_dict[k] = torch.Tensor(np_dict[v]).to(init_model.device)
+    np_dict.close()
+    l = []
+    for d in state_dict :
+        if "num_batches_tracked" in d :
+            l.append(d)
+    for d in l :
+        del(state_dict[d])
+    init_model.model.load_state_dict(state_dict,strict = True)
+    init_model.val(100)

@@ -612,3 +612,12 @@ class DummyModule(nn.Module):
 
     def loss(self, *args, **kwargs):
         return {}
+
+
+class LinearClassifier(nn.Module):
+    def __init__(self, input_size, output_size):
+        super().__init__()
+        self.linear = torch.nn.Linear(input_size, output_size , bias= False)
+
+    def forward(self, x):
+        return self.linear(x)

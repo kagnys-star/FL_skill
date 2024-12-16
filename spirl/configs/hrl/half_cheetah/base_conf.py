@@ -24,9 +24,9 @@ configuration = {
     'environment': cheetah,
     'sampler': HierarchicalSampler,
     'data_dir': '.',
-    'num_epochs': 3,
+    'num_epochs': 20,
     'max_rollout_len': 1000,
-    'n_steps_per_epoch': 100000,
+    'n_steps_per_epoch': 10000,
     'n_warmup_steps': 5e3,
     }
 configuration = AttrDict(configuration)

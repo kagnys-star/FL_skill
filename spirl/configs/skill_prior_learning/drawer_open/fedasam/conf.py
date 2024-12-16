@@ -20,7 +20,7 @@ configuration = {
     'minimizer' : 'asam',
     'rho': 0.01,
     'eta': 0.1,
-    'init_grad_clip': 0.1,
+    'init_grad_clip': 0.5,
 }
 configuration = AttrDict(configuration)
 

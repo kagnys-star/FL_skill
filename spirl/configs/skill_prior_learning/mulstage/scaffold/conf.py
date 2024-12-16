@@ -2,7 +2,7 @@ import os
 from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl, Prox_clients
 from spirl.components.logger import Logger
 from spirl.utils.general_utils import AttrDict
-from spirl.configs.default_data_configs.metaworld import data_spec
+from spirl.configs.default_data_configs.half_cheetah import data_spec
 from spirl.components.evaluator import TopOfNSequenceEvaluator ,SequenceEvaluator
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
@@ -17,10 +17,8 @@ configuration = {
     'evaluator': SequenceEvaluator,
     'top_of_n_eval': 1,
     'top_comp_metric': 'mse',
-    'minimizer' : 'ASOL',
-    'rho' : 0.05,
-    'mu' : 0.001 ,
-    "init_grad_clip" : 3,
+    'optimizer' : 'radam',
+    'batch_size': 16,
 }
 configuration = AttrDict(configuration)
 
@@ -28,8 +26,8 @@ model_config = AttrDict(
     state_dim=data_spec.state_dim,
     action_dim=data_spec.n_actions,
     n_rollout_steps=10,
-    kl_div_weight=1,
-    #target_kl= 5e-4,
+    #kl_div_weight=1e-3,
+    target_kl= 1,
     nz_enc=128,
     nz_mid=128,
     n_processing_layers=5,

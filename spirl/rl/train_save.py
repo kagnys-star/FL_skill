@@ -151,20 +151,20 @@ class RLTrainer:
 
                 # log results
                 with timers['log'].time():
-                    if self.is_chef :
+                    if self.is_chef and self.log_outputs_now:
                         self.agent.log_outputs(agent_outputs, None, self.logger,
                                                log_images=False, step=self.global_step)
                         self.print_train_update(epoch, agent_outputs, timers)
 
     def val(self,epoch=0):
         """Evaluate agent."""
-        #val_rollout_storage = RolloutStorage()
-        val_rollout_storage = SuccessRateRolloutStorage()
+        val_rollout_storage = RolloutStorage()
+        #val_rollout_storage = SuccessRateRolloutStorage()
         #val_rollout_storage= accuracy_RolloutStorage()
         with self.agent.val_mode():
             with torch.no_grad():
                 with timing("Eval rollout time: "):
-                    for _ in range(3):   # for efficiency instead of self.args.n_val_samples
+                    for _ in range(10):   # for efficiency instead of self.args.n_val_samples
                         val_rollout_storage.append(self.sampler.sample_episode(is_train=False, render=False))
             rollout_stats = val_rollout_storage.rollout_stats()
 
@@ -178,7 +178,7 @@ class RLTrainer:
             if epoch == (self._hp.num_epochs - 1):
                 self.make_csv(rollout_stats)
             print("Evaluation Avg_Reward: {}".format(rollout_stats.avg_reward))
-            print("Evaluation success_rate: {}".format(rollout_stats.success))
+            #print("Evaluation success_rate: {}".format(rollout_stats.success))
         #save_frames_as_video(val_rollout_storage)
 
         del val_rollout_storage
@@ -336,11 +336,12 @@ class RLTrainer:
         return self.conf.mpi.num_workers > 1
 
     def make_csv(self, results):
-        file_path = os.path.join(self.conf.exp_dir, "val_result","3_mix",self.args.csv)
+        file_path = os.path.join(self.conf.exp_dir, "val_result","mulsage",self.args.csv)
         parent_dir = os.path.dirname(file_path)
         results.rounds = 300
+        results.tasknum = str(self.args.prefix).split("_")[-2]
         dic_results = {key: [value] for key, value in results.items()}
-        #results.rounds = str(self.args.prefix).split("_")[-1]
+
 
         # 파일을 저장할 디렉토리가 존재하지 않으면 생성
         if not os.path.exists(parent_dir):

@@ -22,6 +22,8 @@ if __name__ == '__main__':
         client = FS_Clients(args = args).to_client()
     elif exp_mode == 'feddyn':
         client = FD_Clients(args = args).to_client()
+    elif exp_mode == 'test':
+        client = Test_Clients(args = args).to_client()
     else:
         raise ValueError("federated learning '{}' not supported!".format(exp_mode))
     fl.client.start_client(server_address="127.0.0.1:8080", client=client)

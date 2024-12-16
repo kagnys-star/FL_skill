@@ -33,7 +33,7 @@ class WandBLogger:
             dir=path,
             entity=entity,
             notes=conf.notes if 'notes' in conf else '',
-            #mode="online",
+            #mode="offline",
 
         )
 

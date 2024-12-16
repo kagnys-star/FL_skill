@@ -4,8 +4,8 @@ export DATA_DIR=./data
 #!/bin/bash
 set -e
 
-exp_list=("fedasam" "fednova" "fedsol" "feddyn")
-alpha_list=("hetero4")
+exp_list=("fedasam" "fedprox" "fedavg")
+alpha_list=("one")
 
 # enable CTRL+C to stop all background processes
 trap "trap - SIGTERM && kill -- -$$" SIGINT SIGTERM
@@ -13,10 +13,10 @@ trap "trap - SIGTERM && kill -- -$$" SIGINT SIGTERM
 for mode in "${exp_list[@]}"; do
     for alpha in "${alpha_list[@]}"; do
         # 경로가 없는 경우 생성
-        save_path="${EXP_DIR}/skill_prior_learning/mt6/${mode}/${alpha}/repeat/300"
-        object_name="mt6_${mode}_${alpha}"
+        save_path="${EXP_DIR}/skill_prior_learning/6_mix_task/${mode}/${alpha}/repeat/300"
+        object_name="6_mix_task_${mode}_${alpha}"
         # Python 스크립트 실행
-        for j in $(seq 0 5); do
+        for j in $(seq 19 19); do
             env_name="${object_name}_${j}_300"
             CUDA_VISIBLE_DEVICES=0 mpirun -np 9 python3 spirl/rl/train_save.py \
                     --csv="${object_name}.csv" \
