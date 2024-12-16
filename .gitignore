@@ -5,8 +5,8 @@ __pycache__
 experiments/
 outputs/
 spirl/wandb/
-metaworld
-metaworld_complex
+/metaworld
+/metaworld_complex
 eval_2.sh
 eval_3.sh
 test_prior_skill.ipynb
@@ -18,4 +18,4 @@ spirl/FL_SPIRL_client.py
 spirl/FL_SPIRL_client2.py
 spirl/FL_SPIRL_client3.py
 spirl/images.ipynb
-data/
+/data
