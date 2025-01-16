@@ -1,6 +1,6 @@
 import os
 from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
-from spirl.models.info_spirl_mdl import INFOSPiRLMdl
+from spirl.models.info_spirl_mdl import INFOSPiRLMdl , ClassSPiRLMdl
 from spirl.components.logger import Logger
 from spirl.utils.general_utils import AttrDict
 from spirl.configs.default_data_configs.half_cheetah import data_spec
@@ -10,7 +10,7 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 
 
 configuration = {
-    'model': INFOSPiRLMdl,
+    'model': ClassSPiRLMdl,
     'logger': Logger,
     'data_dir': "./data/cheetah/1",
     'epoch_cycles_train': 30,
@@ -33,6 +33,7 @@ model_config = AttrDict(
     tasks= 4,
     label_weights= 5e-1,
     linear_condition = True,
+    normalization='group',
 )
 
 # Dataset

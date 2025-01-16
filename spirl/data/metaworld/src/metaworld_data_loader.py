@@ -26,10 +26,18 @@ class METASequenceSplitDataset():
         self.seqs = []
         for end_idx in seq_end_idxs:
             if end_idx+1 - start < self.subseq_len: continue    # skip too short demos
-            self.seqs.append(AttrDict(
-                states=self.dataset['observations'][start:end_idx+1],
-                actions=self.dataset['actions'][start:end_idx+1],
-            ))
+            if "labels" in self.dataset:
+                self.seqs.append(AttrDict(
+                    states=self.dataset['observations'][start:end_idx+1],
+                    actions=self.dataset['actions'][start:end_idx+1],
+                    labels=self.dataset['labels'][start:end_idx+1],
+                ))
+
+            else:
+                self.seqs.append(AttrDict(
+                    states=self.dataset['observations'][start:end_idx+1],
+                    actions=self.dataset['actions'][start:end_idx+1],
+                ))
             start = end_idx+1
 
             # 0-pad sequences for skill-conditioned training
@@ -74,6 +82,8 @@ class METASequenceSplitDataset():
         )
         if self.remove_goal:
             output.states = output.states[..., :int(output.states.shape[-1]/2)]
+        if "labels" in seq:
+            output.labels= seq.labels[start_idx]
         return output
 
     def _sample_seq(self):

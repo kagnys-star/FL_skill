@@ -24,6 +24,12 @@ if __name__ == '__main__':
         client = FD_Clients(args = args).to_client()
     elif exp_mode == 'test':
         client = Test_Clients(args = args).to_client()
+    elif exp_mode == 'fedopt':
+        client = Mulopt_Clients(args = args).to_client()
+    elif exp_mode == 'fedgan':
+        client = VAEGAN_Clients(args = args).to_client()
+    elif exp_mode == 'feddez':
+        client = Dualenc_Clients(args = args).to_client()
     else:
         raise ValueError("federated learning '{}' not supported!".format(exp_mode))
     fl.client.start_client(server_address="127.0.0.1:8080", client=client)

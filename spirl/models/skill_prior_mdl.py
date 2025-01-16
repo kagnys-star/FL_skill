@@ -76,7 +76,7 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
             'n_prior_nets': 1,              # number of prior networks in ensemble
             'num_prior_net_layers': 6,      # number of layers of the learned prior MLP
             'nz_mid_prior': 128,            # dimensionality of internal feature spaces for prior net
-            'nll_prior_train': True,        # if True, trains learned prior by maximizing NLL
+            'nll_prior_train': False,        # if True, trains learned prior by maximizing NLL
             'learned_prior_type': 'gauss',  # distribution type for learned prior, ['gauss', 'gmm', 'flow']
             'n_gmm_prior_components': 5,    # number of Gaussian components for GMM learned prior
         })
@@ -135,6 +135,7 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
         output.z = output.p.sample() if self._sample_prior else output.q.sample()
         output.z_q = output.z.clone() if not self._sample_prior else output.q.sample()   # for loss computation
         output.z_p = output.q_hat.sample()
+   # for loss computation
 
         # decode
         assert self._regression_targets(inputs).shape[1] == self._hp.n_rollout_steps
@@ -185,11 +186,11 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
         :arg phase: 'train' or 'val'
         :arg logger: logger class, visualization functions should be implemented in this class
         """
+        self._logger.log_scalar(((model_output.q_hat.mu - model_output.q.mu)**2/model_output.q.sigma**2).mean(), "mu_var_norm", step, phase)
+        self._logger.log_scalar(((model_output.q_hat.mu - model_output.q.mu)**2).mean(), "mu_var", step, phase)
         self._logger.log_scalar(self.beta, "beta", step, phase)
-        self._logger.log_scalar(model_output.q.mu.mean(), "q_mu", step, phase)
-        self._logger.log_scalar(model_output.q_hat.mu.mean(), "q_hat_mu", step, phase)
-        self._logger.log_scalar(model_output.q.sigma.mean(), "q_sigma", step, phase)
-        self._logger.log_scalar(model_output.q_hat.sigma.mean(), "q_hat_sigma", step, phase)
+        self._logger.log_scalar((model_output.q_hat.sigma**2/model_output.q.sigma**2).mean(), "q_var_norm", step, phase)
+        self._logger.log_scalar((model_output.q.log_sigma - model_output.q_hat.log_sigma).mean(), "q_sim", step, phase)
         #self._logger.log_scalar(mse(model_output.reconstruction,(model_output.q_reconstruction )), "prior_mse", step, phase)
 
         # log videos/gifs in tensorboard
@@ -314,10 +315,10 @@ class SkillPriorMdl(BaseModel, ProbabilisticModel):
             return MultivariateGaussian(prior_mdl(inputs))
 
     def _compute_learned_prior_loss(self, model_output):
-        if self._hp.nll_prior_train:
-            loss = NLL(breakdown=0)(model_output.q_hat, model_output.z_q.detach())
-        else:
-            loss = KLDivLoss(breakdown=0)(model_output.q.detach(), model_output.q_hat)
+        #if self._hp.nll_prior_train:
+        #    loss = NLL(breakdown=0)(model_output.q_hat, model_output.z_q.detach())
+        #else:
+        loss = KLDivLoss(breakdown=0)(model_output.q.detach(), model_output.q_hat)
         # aggregate loss breakdown for each of the priors in the ensemble
         loss.breakdown = torch.stack([chunk.mean() for chunk in torch.chunk(loss.breakdown, self._hp.n_prior_nets)])
         loss.weight =  self._hp.q_hat_weight

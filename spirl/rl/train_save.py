@@ -336,7 +336,7 @@ class RLTrainer:
         return self.conf.mpi.num_workers > 1
 
     def make_csv(self, results):
-        file_path = os.path.join(self.conf.exp_dir, "val_result","mulsage",self.args.csv)
+        file_path = os.path.join(self.conf.exp_dir, "val_result","test_decoder",self.args.csv)
         parent_dir = os.path.dirname(file_path)
         results.rounds = 300
         results.tasknum = str(self.args.prefix).split("_")[-2]

@@ -1,5 +1,5 @@
 import os
-from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
+from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl,DualSPiRLMdl
 from spirl.models.info_spirl_mdl import INFOSPiRLMdl
 from spirl.components.logger import Logger
 from spirl.utils.general_utils import AttrDict
@@ -10,7 +10,7 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 
 
 configuration = {
-    'model': ClSPiRLMdl,
+    'model': DualSPiRLMdl,
     'logger': Logger,
     'data_dir': "./data/cheetah/1",
     'epoch_cycles_train': 30,
@@ -30,6 +30,7 @@ model_config = AttrDict(
     nz_mid=128,
     n_processing_layers=5,
     cond_decode=True,
+    normalization='group',
     #tasks= 4,
     #label_weights= 5e-1,
     #linear_condition = True,

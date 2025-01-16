@@ -246,7 +246,8 @@ if __name__ == "__main__":
         n_processing_layers=5,
         cond_decode=True,
         device = "cuda",
-        batch_size = 512
+        batch_size = 512,
+        normalization='group',
     )
 
     data_config = AttrDict()
@@ -281,14 +282,14 @@ if __name__ == "__main__":
                 save_path = f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mt4/{folder_name}/repeat/{save_num}/weights"
                 save_checkpoint(basemodel,folder=save_path)
     '''
-    exp_mode = ["fedmmd"] 
+    exp_mode = ["prior_sim2"] 
     data_type = ["hetero2"]
     for exp in exp_mode:
         for d_type in data_type:
             folder_name = exp + "/" + d_type
             save_num = 300
-            basemodel =  gl_numpy_model_load_change(config=model_config, init_path=f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/ashtah/{folder_name}/weights/round-{save_num}-weights.npz")
-            save_path = f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/ashtah/{folder_name}/repeat/{save_num}/weights"
+            basemodel =  gl_numpy_model_load_change(config=model_config, init_path=f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/testmodel/{folder_name}/weights/round-{save_num}-weights.npz")
+            save_path = f"/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/testmodel/{folder_name}/repeat/{save_num}/weights"
             save_checkpoint(basemodel,folder=save_path)
     '''
     dataset_class = basemodel.conf.data.dataset_spec.dataset_class

@@ -41,7 +41,7 @@ class SM_FedYogi(FedYogi):
         # Call aggregate_fit from base class (FedAvg) to aggregate parameters and metrics
         aggregated_parameters, aggregated_metrics = super().aggregate_fit(server_round, results, failures)
 
-        if (aggregated_parameters is not None) and (server_round % 5 == 0):
+        if (aggregated_parameters is not None) and (server_round % 10 == 0):
             # Convert `Parameters` to `List[np.ndarray]`
             aggregated_ndarrays: List[np.ndarray] = parameters_to_ndarrays(aggregated_parameters)
             # Save aggregated_ndarrays
@@ -65,7 +65,7 @@ class SM_FedAdagrad(FedAdagrad):
         # Call aggregate_fit from base class (FedAvg) to aggregate parameters and metrics
         aggregated_parameters, aggregated_metrics = super().aggregate_fit(server_round, results, failures)
 
-        if (aggregated_parameters is not None) and (server_round % 5 == 0):
+        if (aggregated_parameters is not None) and (server_round % 10 == 0):
             # Convert `Parameters` to `List[np.ndarray]`
             aggregated_ndarrays: List[np.ndarray] = parameters_to_ndarrays(aggregated_parameters)
             # Save aggregated_ndarrays
@@ -89,7 +89,7 @@ class SM_FedProx(FedProx):
         # Call aggregate_fit from base class (FedAvg) to aggregate parameters and metrics
         aggregated_parameters, aggregated_metrics = super().aggregate_fit(server_round, results, failures)
 
-        if (aggregated_parameters is not None) and (server_round % 5 == 0):
+        if (aggregated_parameters is not None) and (server_round % 10 == 0):
             # Convert `Parameters` to `List[np.ndarray]`
             aggregated_ndarrays: List[np.ndarray] = parameters_to_ndarrays(aggregated_parameters)
             # Save aggregated_ndarrays
@@ -113,7 +113,7 @@ class SM_FedAdam(FedAdam):
         # Call aggregate_fit from base class (FedAvg) to aggregate parameters and metrics
         aggregated_parameters, aggregated_metrics = super().aggregate_fit(server_round, results, failures)
 
-        if (aggregated_parameters is not None) and (server_round % 5 == 0):
+        if (aggregated_parameters is not None) and (server_round % 10 == 0):
             # Convert `Parameters` to `List[np.ndarray]`
             aggregated_ndarrays: List[np.ndarray] = parameters_to_ndarrays(aggregated_parameters)
             # Save aggregated_ndarrays
@@ -137,7 +137,7 @@ class SM_FedAVG(FedAvg):
         # Call aggregate_fit from base class (FedAvg) to aggregate parameters and metrics
         aggregated_parameters, aggregated_metrics = super().aggregate_fit(server_round, results, failures)
 
-        if (aggregated_parameters is not None) and (server_round % 5 == 0):
+        if (aggregated_parameters is not None) and (server_round % 10 == 0):
             # Convert `Parameters` to `List[np.ndarray]`
             aggregated_ndarrays: List[np.ndarray] = parameters_to_ndarrays(aggregated_parameters)
             # Save aggregated_ndarrays
@@ -474,7 +474,7 @@ class Scaffold(FedAvg):
         #    pickle.dump(server_covariates, fw)
         self.global_weighs = weights_aggregated
         self.covariates = new_server_covariates
-        if (weights_aggregated is not None) and (server_round % 5 == 0):
+        if (weights_aggregated is not None) and (server_round % 10 == 0):
             # Convert `Parameters` to `List[np.ndarray]`
             # Save aggregated_ndarrays
             np.savez(os.path.join(self.save_dir,f"round-{server_round}-weights.npz"), *weights_aggregated)
@@ -537,7 +537,7 @@ class FedDyn(SM_FedAVG):
                 self.global_parameters[i] = layers - (1.0/ self.dyn_alpha) * self.h_t[i]
         
 
-        if (self.global_parameters is not None) and (server_round % 5 == 0):
+        if (self.global_parameters is not None) and (server_round % 10 == 0):
             # Convert `Parameters` to `List[np.ndarray]`
             aggregated_ndarrays: List[np.ndarray] = parameters_to_ndarrays(aggregated_parameters)
             # Save aggregated_ndarrays

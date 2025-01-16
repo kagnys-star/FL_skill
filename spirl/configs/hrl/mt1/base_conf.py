@@ -11,6 +11,8 @@ from spirl.rl.components.replay_buffer import UniformReplayBuffer
 from spirl.rl.agents.ac_agent import SACAgent
 from spirl.rl.agents.skill_space_agent import SkillSpaceAgent
 from spirl.models.skill_prior_mdl import SkillPriorMdl
+from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
+from spirl.rl.policies.cl_model_policies import ClModelPolicy
 from spirl.configs.default_data_configs.metaworld import data_spec
 
 current_dir = os.path.dirname(os.path.realpath(__file__))

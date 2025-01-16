@@ -15,7 +15,9 @@ from torch import autograd
 from torch.optim import Adam, RMSprop, SGD
 from functools import partial
 from typing import Dict
+from itertools import chain
 
+from spirl.modules.variational_inference import MultivariateGaussian
 from spirl.utils.general_utils import RecursiveAverageMeter, map_dict
 from spirl.components.checkpointer import get_config_path
 from spirl.utils.general_utils import dummy_context, AttrDict, get_clipped_optimizer,\
@@ -44,6 +46,7 @@ class BaseClients(BaseTrainer,fl.client.NumPyClient):
     def __init__(self, args):
         self.args = args
         self.setup_device()
+        self.save_dir = self.fun_save_path(prefix_only=True)
         # set up params
         self.conf = conf = self.get_config()
         self._hp = self._default_hparams()
@@ -94,7 +97,7 @@ class BaseClients(BaseTrainer,fl.client.NumPyClient):
             'logger_test': None,
             'evaluator': None,
             'data_dir': None,  # directory where dataset is in
-            'batch_size': 32,
+            'batch_size': 16,
             'exp_path': None,  # Path to the folder with experiments
             'num_epochs': 200,
             'epoch_cycles_train': 1,
@@ -102,7 +105,7 @@ class BaseClients(BaseTrainer,fl.client.NumPyClient):
             'minimizer ' : None,
             'lr': 1e-3,
             'gradient_clip': None,
-            'init_grad_clip': 0.5,
+            'init_grad_clip': 0.001,
             'init_grad_clip_step': 500,     # clip gradients in initial N steps to avoid NaNs
             'momentum': 0,      # momentum in RMSProp / SGD optimizer
             'rho' : 0.1, # SAM/ ASAM optimizer
@@ -322,8 +325,9 @@ class BaseClients(BaseTrainer,fl.client.NumPyClient):
         return self.global_step % self.log_outputs_interval == 0 or self.global_step % self.log_images_interval == 0
     
     def aux_info(self,outputs):
+        z_prior = MultivariateGaussian(torch.zeros_like(outputs.q.mu), torch.zeros_like(outputs.q.sigma))
         self.log_q_zx_samples.append(ten2ar(outputs.q.log_prob(outputs.z)))
-        self.log_q_z_samples.append(ten2ar((-0.5 *(outputs.z ** 2) + math.log(math.sqrt(2*math.pi))).sum(dim=1)))
+        self.log_q_z_samples.append(ten2ar(z_prior.log_prob(outputs.z)))
         self.mu_samples.append(ten2ar(outputs.q.mu))
 
     def log_outputs(self, output, inputs,epoch,losses,data_load_time,batch_time,upto_log_time,epoch_len):
@@ -364,18 +368,18 @@ class BaseClients(BaseTrainer,fl.client.NumPyClient):
         self.logger.log_scalar(np.mean(mi_estimate), "mi_estimate", self.global_step, "train")
 
     def importants_weights(self, output, inputs , k=5):
-        sigma = 1.0
+        z_prior = MultivariateGaussian(torch.zeros_like(output.q.mu),torch.zeros_like(output.q.sigma))
         log_weights = []
         for _ in range(k):
-            z_sample = output.p.sample()  # (batch_size, latent_dim)
+            z_sample = output.q.sample()  # (batch_size, latent_dim)
             x_reconstructed = self.model.decode(z_sample,
                                             cond_inputs=self.model._learned_prior_input(inputs),
                                             steps=self.model._hp.n_rollout_steps,
                                             inputs=inputs)
             mse = torch.sum((inputs.actions - x_reconstructed)**2, dim=-1)
-            log_px_given_z = -0.5 * (torch.sum(mse, dim=-1)  / (sigma**2) + torch.log(torch.tensor(2 * math.pi * sigma**2, device=z_sample.device)))
-            log_pz = -0.5 * torch.sum(z_sample**2, dim=-1)
-            log_qz_given_x = -0.5 * torch.sum((z_sample - output.p.mu)**2 / output.p.sigma**2 + torch.log(output.p.sigma**2), dim=-1)
+            log_px_given_z = z_prior.log_prob(mse) # 추가텀 확장
+            log_pz = z_prior.log_prob(z_sample)
+            log_qz_given_x = output.q.log_prob(z_sample)
             log_weight = log_px_given_z + log_pz - log_qz_given_x
             log_weights.append(log_weight)
         log_weights = torch.stack(log_weights, dim=0)
@@ -383,13 +387,39 @@ class BaseClients(BaseTrainer,fl.client.NumPyClient):
         return log_likelihood.mean().item()
         
 
+    def fun_save_path(self,prefix_only = False):
+        # Get the environment variable for the experiment directory
+        exp_dir = os.environ['EXP_DIR']
         
+        # Extract the part of the path after 'configs/'
+        path = self.args.path.split('configs/', 1)[1]  # Extract 'skill_prior_learning/half_cheetah/FL_hierarchial_cl'
+        path_components = path.split('/')[:-1]  # Extract everything except the last part (FL_hierarchial_cl)
+        # Remove 'FL_hierarchial_cl' (or any last part) from the path
+        if prefix_only: 
+            prefix_parts = self.args.prefix.split('-')
+            path_components.pop()
+            path_components.append(prefix_parts[0])
+        modified_path = '/'.join(path_components)  # Rejoin the components back
+        # Extract the relevant parts from the prefix (fedadgrad and iid)
+        prefix_parts = self.args.prefix.split('-')
 
+        method = prefix_parts[1]  # 'fedadgrad'
+        # 'iid_server' needs to be split to extract just 'iid'
+        data_distribution = prefix_parts[2].split('_')[0]  # Extract 'iid' from 'iid_server'
+        
+        client_num = self.args.data_dir.split('/')[-1]
+        # Create the final save path
+        save_path = os.path.join(exp_dir, modified_path, method, data_distribution, client_num, 'weights')
+        os.makedirs(save_path , exist_ok=True)
+        return save_path
     ########################
     ### flower functions ### 
     ########################
 
     def get_parameters(self,config):
+        if (self.global_epoch % 10 == 0):
+            aggregated_ndarrays = [val.cpu().numpy() for _, val in self.model.state_dict().items()]
+            np.savez(os.path.join(self.save_dir,f"round-{self.global_epoch}-weights.npz"), *aggregated_ndarrays)
         return [val.cpu().numpy() for _, val in self.model.state_dict().items()]
 
     def set_parameters(self, parameters):
@@ -655,6 +685,9 @@ class FN_Clients(FP_Clients):
 
 
     def get_parameters(self, config):
+        if (self.global_epoch % 10 == 0):
+            aggregated_ndarrays = [val.cpu().numpy() for _, val in self.model.state_dict().items()]
+            np.savez(os.path.join(self.save_dir,f"round-{self.global_epoch}-weights.npz"), *aggregated_ndarrays)
         return [(self.global_weights[key].cpu().numpy() - param.cpu().numpy()) for key, param in self.model.state_dict().items()]
     
     def get_gradient_scaling(self):
@@ -1004,3 +1037,214 @@ class Test_Clients(BaseClients):
     def set_parameters(self, parameters):
         super().set_parameters(parameters)
         self.sp_encoder.load_weights('global',self.model.q.state_dict())
+
+
+class Mulopt_Clients(BaseClients):
+    def __init__(self, args):
+        super().__init__(args)
+        del self.optimizer
+        self.model.dataset_size = len(self.train_loader)
+        self.E_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, chain(self.model.decoder.parameters(),self.model.q.parameters())), lr=self._hp.lr)
+        self.P_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.p.parameters()), lr=self._hp.lr)
+        #self.train_epoch(0)
+
+    
+    def train(self) :
+        self.E_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, chain(self.model.decoder.parameters(),self.model.q.parameters())), lr=self._hp.lr)
+        self.P_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.p.parameters()), lr=self._hp.lr)
+        for epoch in range(self._hp.num_epochs):
+            self.train_epoch(epoch)
+            self.global_epoch += 1
+            self.aux_log()
+    
+    def train_epoch(self, epoch):
+        self.model.train()
+        self.model.update_cycle_beta(self.global_epoch)
+        epoch_len = len(self.train_loader)
+        end = time.time()
+        batch_time = AverageMeter()
+        upto_log_time = AverageMeter()
+        data_load_time = AverageMeter()
+        self.log_outputs_interval = self.args.log_interval
+        self.log_images_interval = int(epoch_len / self.args.per_epoch_img_logs)
+        print('starting epoch ', epoch)
+        for self.batch_idx, sample_batched in enumerate(self.train_loader):
+            data_load_time.update(time.time() - end)
+            inputs = AttrDict(map_dict(lambda x: x.to(self.device), sample_batched))
+            self.E_optimizer.zero_grad()
+            self.P_optimizer.zero_grad()
+            output = self.model(inputs)
+            losses = self.model.loss(output, inputs)
+
+            
+            losses.total.value.backward()
+            #if self.global_step < self._hp.init_grad_clip_step:
+            # clip gradients in initial steps to avoid NaN gradients
+            torch.nn.utils.clip_grad_norm_(chain(self.model.decoder.parameters(),self.model.q.parameters()), self._hp.init_grad_clip)
+            self.E_optimizer.step()
+
+            losses2 = losses.q_hat_loss.value * losses.q_hat_loss.weight
+            losses2.backward()
+            #if self.global_step < self._hp.init_grad_clip_step:
+            # clip gradients in initial steps to avoid NaN gradients
+            torch.nn.utils.clip_grad_norm_(self.model.p.parameters(), self._hp.init_grad_clip)
+            self.P_optimizer.step()
+            self.aux_info(output)
+            self.call_hooks(inputs, output, losses, epoch)
+   
+            self.model.step()
+
+            if self.args.train_loop_pdb:
+                import pdb; pdb.set_trace()
+
+            upto_log_time.update(time.time() - end)
+            batch_time.update(time.time() - end)
+            end = time.time()
+            if self.log_outputs_now:
+                self.log_outputs( output, inputs,epoch,losses,data_load_time,batch_time,upto_log_time,epoch_len)
+            del output, losses
+            self.global_step = self.global_step + 1
+
+
+class VAEGAN_Clients(BaseClients):
+    def __init__(self, args):
+        super().__init__(args)
+        del self.optimizer
+        self.E_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.q.parameters()), lr=self._hp.lr)
+        self.P_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.p.parameters()), lr=self._hp.lr)
+        self.D_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.decoder.parameters()), lr=self._hp.lr)
+        self.Dis_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.discriminator.parameters()), lr=self._hp.lr)
+    
+    def train(self) :
+        self.E_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.q.parameters()), lr=self._hp.lr)
+        self.P_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.p.parameters()), lr=self._hp.lr)
+        self.D_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.decoder.parameters()), lr=self._hp.lr)
+        self.Dis_optimizer = self.get_optimizer_class()(filter(lambda p: p.requires_grad, self.model.discriminator.parameters()), lr=self._hp.lr)
+        for epoch in range(self._hp.num_epochs):
+            self.train_epoch(epoch)
+            self.global_epoch += 1
+            self.aux_log()
+    
+    def train_epoch(self, epoch):
+        self.model.train()
+        self.model.update_cycle_beta(self.global_epoch)
+        epoch_len = len(self.train_loader)
+        end = time.time()
+        batch_time = AverageMeter()
+        upto_log_time = AverageMeter()
+        data_load_time = AverageMeter()
+        self.log_outputs_interval = self.args.log_interval
+        self.log_images_interval = int(epoch_len / self.args.per_epoch_img_logs)
+        print('starting epoch ', epoch)
+        for self.batch_idx, sample_batched in enumerate(self.train_loader):
+            data_load_time.update(time.time() - end)
+            inputs = AttrDict(map_dict(lambda x: x.to(self.device), sample_batched))
+            output = self.model(inputs)
+            losses = self.model.loss(output, inputs)
+            Dis_loss = losses.gan_loss.value *losses.gan_loss.weight
+            Dec_loss =  losses.rec_mse.value *losses.rec_mse.weight -(losses.gan_loss.value *losses.gan_loss.weight)
+            Enc_loss =  losses.kl_loss.value *losses.kl_loss.weight + losses.gan_loss.value *losses.gan_loss.weight
+            losses2 = self.model.loss_q(output)
+            if self.global_step < self._hp.init_grad_clip_step:
+            # clip gradients in initial steps to avoid NaN gradients
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self._hp.init_grad_clip)
+            self.Dis_optimizer.zero_grad()
+            Dis_loss.backward(retain_graph=True)
+            self.Dis_optimizer.step()
+            self.D_optimizer.zero_grad()
+            Dec_loss.backward(retain_graph=True)
+            self.D_optimizer.step()
+            self.E_optimizer.zero_grad()
+            Enc_loss.backward()
+            self.E_optimizer.step()
+            self.P_optimizer.zero_grad()
+            losses2.total.value.backward()
+            self.P_optimizer.step()
+            self.aux_info(output)
+            self.call_hooks(inputs, output, losses, epoch)
+            self.model.step()
+
+            if self.args.train_loop_pdb:
+                import pdb; pdb.set_trace()
+
+            upto_log_time.update(time.time() - end)
+            batch_time.update(time.time() - end)
+            end = time.time()
+            if self.log_outputs_now:
+                self.log_outputs( output, inputs,epoch,losses,data_load_time,batch_time,upto_log_time,epoch_len)
+            del output, losses
+            self.global_step = self.global_step + 1
+
+    def set_parameters(self, parameters):
+        params_dict = zip(self.model.state_dict().keys(), parameters)
+        state_dict = OrderedDict()
+        for k, v in params_dict:
+            state_dict[k] = torch.Tensor(v)
+        l = []
+        for d in state_dict :
+            if "num_batches_tracked" in d  or "discriminator" in d:
+                l.append(d)
+        for d in l :
+            del( state_dict[d] )
+        # parameters update
+        self.model.load_state_dict(state_dict,strict=False)
+
+
+
+class Dualenc_Clients(BaseClients):
+
+    def train_epoch(self, epoch):
+        self.model.train()
+        self.model.update_cycle_beta(self.global_epoch)
+        self.model.round = self.global_epoch
+        epoch_len = len(self.train_loader)
+        end = time.time()
+        batch_time = AverageMeter()
+        upto_log_time = AverageMeter()
+        data_load_time = AverageMeter()
+        self.log_outputs_interval = self.args.log_interval
+        self.log_images_interval = int(epoch_len / self.args.per_epoch_img_logs)
+        print('starting epoch ', epoch)
+        for self.batch_idx, sample_batched in enumerate(self.train_loader):
+            data_load_time.update(time.time() - end)
+            inputs = AttrDict(map_dict(lambda x: x.to(self.device), sample_batched))
+
+            output = self.model(inputs)
+            losses = self.model.loss(output, inputs)
+            self.optimizer.zero_grad()
+            losses.total.value.backward()
+            if self.global_step < self._hp.init_grad_clip_step:
+            # clip gradients in initial steps to avoid NaN gradients
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self._hp.init_grad_clip)
+            self.optimizer.step()
+
+            self.aux_info(output)
+            self.call_hooks(inputs, output, losses, epoch)
+   
+            self.model.step()
+
+            if self.args.train_loop_pdb:
+                import pdb; pdb.set_trace()
+
+            upto_log_time.update(time.time() - end)
+            batch_time.update(time.time() - end)
+            end = time.time()
+            if self.log_outputs_now:
+                self.log_outputs( output, inputs,epoch,losses,data_load_time,batch_time,upto_log_time,epoch_len)
+            del output, losses
+            self.global_step = self.global_step + 1
+
+
+    def set_parameters(self, parameters):
+        params_dict = zip(self.model.state_dict().keys(), parameters)
+        state_dict = OrderedDict()
+        for k, v in params_dict:
+            state_dict[k] = torch.Tensor(v)
+        l = []
+        for d in state_dict :
+            if "num_batches_tracked" in d  or "q" in d:
+                l.append(d)
+        for d in l :
+            del( state_dict[d] )
+        # parameters update
+        self.model.load_state_dict(state_dict,strict=False)

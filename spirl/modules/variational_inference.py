@@ -118,6 +118,9 @@ class UnitGaussian(Gaussian):
 class MultivariateGaussian(Gaussian):
     def log_prob(self, val):
         return super().log_prob(val).sum(-1)
+    
+    def keep_log_prob(self, val):
+        return super().log_prob(val)
 
     @staticmethod
     def stack(*argv, dim):

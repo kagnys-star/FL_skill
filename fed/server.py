@@ -22,7 +22,7 @@ from spirl.utils.pytorch_utils import  ten2ar
 from spirl.components.trainer_base import BaseTrainer
 from spirl.utils.wandb import WandBLogger
 from collections import OrderedDict
-
+from spirl.modules.variational_inference import MultivariateGaussian
 import wandb
 WANDB_PROJECT_NAME = 'fl-skill'
 WANDB_ENTITY_NAME = 'yskang'
@@ -60,7 +60,7 @@ class ServerModel(BaseTrainer):
             'logger': None,
             'evaluator': None,
             'data_dir': None,  # directory where dataset is in
-            'batch_size': 32,
+            'batch_size': 16,
             'exp_path': None,  # Path to the folder with experiments
             'num_epochs': 200,
             'epoch_cycles_train': 1,
@@ -101,8 +101,9 @@ class ServerModel(BaseTrainer):
                 losses.prior_mse = L2Loss(1.0)(inputs.actions,(output.q_reconstruction))
                 iw_meter += self.importants_weights(output, inputs)
                 losses_meter.update(losses)
+                z_prior = MultivariateGaussian(torch.zeros_like(output.q.mu), torch.zeros_like(output.q.sigma))
+                z_samples.append(ten2ar(z_prior.log_prob(output.z)))
                 log_q_zx_samples.append(ten2ar(output.q.log_prob(output.z)))
-                z_samples.append(ten2ar((-0.5 *(output.z ** 2) + math.log(math.sqrt(2*math.pi))).sum(dim=1)))
                 mu_samples.append(ten2ar(output.q.mu))
                 del losses
             
@@ -222,23 +223,20 @@ class ServerModel(BaseTrainer):
 
     def importants_weights(self, output, inputs, k=5):
         log_weights = []
+        z_prior = MultivariateGaussian(torch.zeros_like(output.q.mu),torch.zeros_like(output.q.sigma))
         for _ in range(k):
-            z_sample = output.p.sample()  # (batch_size, latent_dim)
+            z_sample = output.q.sample()  # (batch_size, latent_dim)
             x_reconstructed = self.model.decode(z_sample,
                                             cond_inputs=self.model._learned_prior_input(inputs),
                                             steps=self.model._hp.n_rollout_steps,
                                             inputs=inputs)
             mse = torch.sum((inputs.actions - x_reconstructed)**2, dim=-1)
-            #p(x|z) 수정 완료
-            log_px_given_z = -0.5 * torch.sum(mse, dim=-1)
-            #p(z) 애는 수정완료
-            log_pz = -0.5 * torch.sum(z_sample**2, dim=-1) - 0.5 * z_sample.size(-1) * torch.log(torch.tensor(2 * np.pi))
-            #q(z|x)
-            log_qz_given_x = -0.5 * torch.sum((z_sample - output.p.mu)**2 / output.p.sigma**2 + torch.log(output.p.sigma**2), dim=-1)
+            log_px_given_z = z_prior.log_prob(mse) # 추가텀 확장
+            log_pz = z_prior.log_prob(z_sample)
+            log_qz_given_x = output.q.log_prob(z_sample)
             log_weight = log_px_given_z + log_pz - log_qz_given_x
             log_weights.append(log_weight)
         log_weights = torch.stack(log_weights, dim=0)
-        log_weights = log_weights - torch.logsumexp(log_weights, dim=0, keepdim=True)
         log_likelihood = torch.logsumexp(log_weights, dim=0) - torch.log(torch.tensor(k, device=z_sample.device))
         return  log_likelihood.mean().item()
 
@@ -341,7 +339,6 @@ if __name__ == "__main__":
     #model_parameters = np.load("/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mulstage/fedsol/hetero/weights/round-100-weights.npz",allow_pickle=True)
     model_parameters = [val.cpu().numpy() for _, val in init_model.model.state_dict().items()]
     save_dir = fun_save_path(args=args, prefix_only=True)
-
     # Create strategy
     exp_mode = args.exp_mode
     if exp_mode == 'fedavg':

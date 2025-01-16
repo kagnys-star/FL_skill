@@ -57,6 +57,18 @@ class KLDivLoss(Loss):
         return kl_divergence
 
 
+
+class CSLoss(Loss):
+    def compute(self, estimates, targets, activation_function=None):
+        # assert estimates.shape == targets.shape, "Input {} and targets {} for L2 loss need to have identical shape!"\
+        #     .format(estimates.shape, targets.shape)
+        if activation_function is not None:
+            estimates = activation_function(estimates)
+        if not isinstance(targets, torch.Tensor):
+            targets = torch.tensor(targets, device=estimates.device, dtype=estimates.dtype)
+        l2_loss = torch.nn.CosineSimilarity()(estimates, targets)
+        return l2_loss
+
 class CELoss(Loss):
     compute = staticmethod(torch.nn.functional.cross_entropy)
     
@@ -82,6 +94,10 @@ class BCELogitsLoss(Loss):
 class CEELoss(Loss):
     def compute(self, estimates, targets):
         return torch.nn.CrossEntropyLoss()(estimates, targets)
+
+class BCELoss(Loss):
+    def compute(self, estimates, targets):
+        return torch.nn.BCELoss()(estimates, targets)
 
 
 class SimpleLoss(Loss):

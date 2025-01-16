@@ -1,19 +1,20 @@
-from spirl.configs.hrl.mt10.spirl.conf import *
+from spirl.configs.hrl.half_cheetah.spirl.conf import *
 from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
 from spirl.rl.policies.cl_model_policies import ClModelPolicy
 
 # update model params to conditioned decoder on state
 ll_model_params.cond_decode = True
-
+ll_model_params.normalization = 'group'
 
 # create LL closed-loop policy
 ll_policy_params = AttrDict(
     policy_model=ClSPiRLMdl,
     policy_model_params=ll_model_params,
     policy_model_checkpoint=os.path.join(os.environ["EXP_DIR"],
-                                         "skill_prior_learning/mixing_task/fedavg/hetero3/repeat/300"),
+                                         "skill_prior_learning/half_cheetah/fedprox/hetro2/"),
 )
 ll_policy_params.update(ll_model_params)
+
 # create LL SAC agent (by default we will only use it for rolling out decoded skills, not finetuning skill decoder)
 ll_agent_config = AttrDict(
     policy=ClModelPolicy,

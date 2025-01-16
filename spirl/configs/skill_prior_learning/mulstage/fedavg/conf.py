@@ -1,5 +1,5 @@
 import os
-from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl, Prox_clients
+from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
 from spirl.components.logger import Logger
 from spirl.utils.general_utils import AttrDict
 from spirl.configs.default_data_configs.mulstage import data_spec

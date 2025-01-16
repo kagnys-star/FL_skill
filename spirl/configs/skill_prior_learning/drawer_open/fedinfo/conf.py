@@ -1,5 +1,6 @@
 import os
 from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
+from spirl.models.info_spirl_mdl import INFOSPiRLMdl
 from spirl.components.logger import Logger
 from spirl.utils.general_utils import AttrDict
 from spirl.configs.default_data_configs.metaworld import data_spec
@@ -9,16 +10,14 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 
 
 configuration = {
-    'model': ClSPiRLMdl,
+    'model': INFOSPiRLMdl,
     'logger': Logger,
     'data_dir': "./data/cheetah/1",
-    'epoch_cycles_train': 50,
+    'epoch_cycles_train': 30,
     'num_epochs': 1,
     'evaluator': SequenceEvaluator,
     'top_of_n_eval': 1,
     'top_comp_metric': 'mse',
-    'mu' : 0.001,
-    'batch_size': 16,
 }
 configuration = AttrDict(configuration)
 
@@ -27,15 +26,17 @@ model_config = AttrDict(
     action_dim=data_spec.n_actions,
     n_rollout_steps=10,
     kl_div_weight=5e-4,
-    #target_kl= 5e-4,
     nz_enc=128,
     nz_mid=128,
     n_processing_layers=5,
     cond_decode=True,
-
+    tasks= 24,
+    label_weights= 5e-1,
+    linear_condition = True,
 )
 
 # Dataset
 data_config = AttrDict()
 data_config.dataset_spec = data_spec
 data_config.dataset_spec.subseq_len = model_config.n_rollout_steps + 1  # flat last action from seq gets cropped
+data_config.dataset_spec.linear_condition = model_config.linear_condition

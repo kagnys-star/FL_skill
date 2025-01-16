@@ -301,36 +301,3 @@ if __name__ == "__main__":
                 
         
     print(success/10)
-    '''
-    ll_policy_params = AttrDict(
-        policy_model=ClSPiRLMdl,
-        policy_model_params=model_config,
-        policy_model_checkpoint=os.path.join("/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/mt4/fedavg/iid/repeat/300"),
-    )
-    hl_critic_params = AttrDict(
-    action_dim=model_config.action_dim,
-    input_dim=model_config.state_dim,
-    output_dim=1,
-    n_layers=5,  # number of policy network laye
-    nz_mid=256,
-    action_input=True,
-)
-    ll_policy_params.update(model_config)
-    # create LL SAC agent (by default we will only use it for rolling out decoded skills, not finetuning skill decoder)
-    ll_agent_config = AttrDict(
-        policy=ClModelPolicy,
-        policy_params=ll_policy_params,
-        critic=MLPCritic,                   # LL critic is not used since we are not finetuning LL
-        critic_params=hl_critic_params,
-        replay=UniformReplayBuffer,
-        replay_params=AttrDict(),
-)
-    ll_agent = SACAgent(ll_agent_config)
-
-    #basemodel.to(basemodel.device)
-    #get_z_space(model=basemodel, config=data_config)
-    #model_val(model=basemodel, config=data_config)
-    #find_skill(num_samples = 10000, model=basemodel)
-    #basemodel =  gl_numpy_model_load_change(config=model_config, init_path="/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/half_cheetah/fedprox/hetro3/weights/round-500-weights.npz")
-    #save_checkpoint(basemodel,folder="/home/kangys/workspace/FL_skill/experiments/skill_prior_learning/half_cheetah/fedprox/hetro3/weights")
-    '''

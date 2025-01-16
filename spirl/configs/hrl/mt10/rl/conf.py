@@ -1,10 +1,9 @@
-from spirl.configs.hrl.mt10.spirl.conf import *
+from spirl.configs.hrl.mt10.base_conf import *
 from spirl.models.closed_loop_spirl_mdl import ClSPiRLMdl
 from spirl.rl.policies.cl_model_policies import ClModelPolicy
 
 # update model params to conditioned decoder on state
 ll_model_params.cond_decode = True
-
 
 # create LL closed-loop policy
 ll_policy_params = AttrDict(
@@ -23,11 +22,11 @@ ll_agent_config = AttrDict(
 )
 
 # update HL policy model params
-hl_policy_params.update(AttrDict(
-    prior_model=ll_policy_params.policy_model,
-    prior_model_params=ll_policy_params.policy_model_params,
-    prior_model_checkpoint=ll_policy_params.policy_model_checkpoint,
-))
+#hl_policy_params.update(AttrDict(
+#    prior_model=ll_policy_params.policy_model,
+#    prior_model_params=ll_policy_params.policy_model_params,
+#    prior_model_checkpoint=ll_policy_params.policy_model_checkpoint,
+#))
 
 # register new LL agent in agent_config and turn off LL agent updates
 agent_config.update(AttrDict(

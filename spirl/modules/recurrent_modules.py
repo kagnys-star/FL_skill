@@ -78,6 +78,18 @@ class BaseProcessingLSTM(CustomLSTM):
         :return:
         """
         return super().forward(AttrDict(cell_input=input), length=input.shape[1]).output
+    
+
+class DiscProcessingLSTM(CustomLSTM):
+    def __init__(self, hp, in_dim, out_dim):
+        super().__init__(CustomLSTMCell(hp, in_dim, out_dim))
+        
+    def forward(self, input):
+        """
+        :param input: tensor of shape batch x time x channels
+        :return:
+        """
+        return super().forward(AttrDict(cell_input=input), length=1).output
 
 
 class MaskedProcessingLSTM(CustomLSTM):

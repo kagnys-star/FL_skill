@@ -49,7 +49,7 @@ class TopOfNEvaluator:
                                 self.batch_eval_buffer[self._top_comp_metric][b], self._top_comp_metric):
                 self.batch_eval_buffer.aux_outputs[b] = self._store_aux_outputs(inputs, model_output, b)
 
-    @timed("Eval time for batch: ")
+    #@timed("Eval time for batch: ")
     def eval(self, inputs, model):
         self._erase_eval_buffer()
         for n in range(self._top_of_n):
@@ -316,7 +316,7 @@ class batchevaluator(TopOfNSequenceEvaluator):
                 self.batch_eval_buffer[metric_name][b, sample_idx] = metric_fcn(inputs, model_output, b)
             self.batch_eval_buffer.aux_outputs[b] = self._store_aux_outputs(inputs, model_output, b)
 
-    @timed("Eval time for batch: ")
+   # @timed("Eval time for batch: ")
     def eval(self, inputs, model, sample_idx):
         model_output = model(inputs)
         self.eval_single(inputs, model_output, sample_idx = sample_idx)
